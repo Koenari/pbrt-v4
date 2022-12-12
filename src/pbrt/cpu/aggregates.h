@@ -19,6 +19,8 @@ namespace pbrt {
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters);
 
+struct EightWideBVHBuildNode;
+struct WideBVHBuildNode;
 struct BVHBuildNode;
 struct BVHPrimitive;
 struct LinearBVHNode;

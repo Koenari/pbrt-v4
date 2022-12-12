@@ -97,8 +97,71 @@ struct BVHPrimitive {
     // BVHPrimitive Public Methods
     Point3f Centroid() const { return .5f * bounds.pMin + .5f * bounds.pMax; }
 };
+// Wide BVHBuildNode defintion with 8 children
+struct EightWideBVHBuildNode {
+    void InitLeaf(int first, int n, const Bounds3f &b) {
+        firstPrimOffset = first;
+        nPrimitives = n;
+        bounds = b;
+        children[0] = children[1] = children[2] = children[3] = children[4] =
+            children[5] = children[6] = children[7] = nullptr;
+        ++leafNodes;
+        ++totalLeafNodes;
+        totalPrimitives += n;
+    }
 
-// BVHBuildNode Definition
+    void InitInterior(int axis1, int axis2, WideBVHBuildNode *c0, WideBVHBuildNode *c1,
+                      WideBVHBuildNode *c2, WideBVHBuildNode *c3, WideBVHBuildNode *c4,
+                      WideBVHBuildNode *c5, WideBVHBuildNode *c6, WideBVHBuildNode *c7) {
+        children[0] = c0;
+        children[1] = c1;
+        children[2] = c2;
+        children[3] = c3;
+        children[4] = c4;
+        children[5] = c5;
+        children[6] = c6;
+        children[7] = c7;
+        bounds = Union(Union(Union(c0->bounds, c1->bounds), Union(c2->bounds, c3->bounds)),
+            Union(Union(c4->bounds, c5->bounds), Union(c6->bounds, c7->bounds)));
+        splitAxis1 = axis1;
+        splitAxis2 = axis2;
+        nPrimitives = 0;
+        ++interiorNodes;
+    }
+    Bounds3f bounds;
+    WideBVHBuildNode *children[8];
+    int splitAxis1, splitAxis2, firstPrimOffset, nPrimitives;
+};
+//Wide BVHBuildNote defintion with 4 children
+struct WideBVHBuildNode {
+    void InitLeaf(int first, int n, const Bounds3f &b) {
+        firstPrimOffset = first;
+        nPrimitives = n;
+        bounds = b;
+        children[0] = children[1] = children[2] = children[3] = nullptr;
+        ++leafNodes;
+        ++totalLeafNodes;
+        totalPrimitives += n;
+    }
+
+    void InitInterior(int axis1, int axis2, WideBVHBuildNode *c0,
+                      WideBVHBuildNode *c1,
+                      WideBVHBuildNode *c2, WideBVHBuildNode *c3) {
+        children[0] = c0;
+        children[1] = c1;
+        children[2] = c2;
+        children[3] = c3;
+        bounds = Union(Union(c0->bounds, c1->bounds),Union(c2->bounds,c3->bounds));
+        splitAxis1 = axis1;
+        splitAxis2 = axis2;
+        nPrimitives = 0;
+        ++interiorNodes;
+    }
+    Bounds3f bounds;
+    WideBVHBuildNode *children[4];
+    int splitAxis1, splitAxis2, firstPrimOffset, nPrimitives;
+};
+    // BVHBuildNode Definition
 struct BVHBuildNode {
     // BVHBuildNode Public Methods
     void InitLeaf(int first, int n, const Bounds3f &b) {
