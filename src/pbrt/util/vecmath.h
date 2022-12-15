@@ -1312,6 +1312,27 @@ class Bounds3 {
         else
             return 2;
     }
+    PBRT_CPU_GPU
+    std::tuple<int,int> MaxDimensions() const {
+        Vector3<T> d = Diagonal();
+        if (d.x < d.y && d.x < d.z)
+            if (d.y > d.z)  
+                return std::tuple<int, int>(1, 2);
+            else
+                return std::tuple<int, int>(2, 1);
+        else if (d.y < d.z)
+            if (d.x > d.z)
+                return std::tuple<int, int>(2, 0);
+            else
+                return std::tuple<int, int>(0, 2);
+        else {
+            if (d.x > d.y)
+                return std::tuple<int, int>(0, 1);
+            else 
+                return std::tuple<int, int>(1, 0);
+        }
+            
+    }
 
     PBRT_CPU_GPU
     Point3f Lerp(Point3f t) const {
