@@ -109,7 +109,7 @@ struct WideBVHBuildNode {
         totalPrimitives += n;
     }
 
-    void InitInterior(int axis1, int axis2, WideBVHBuildNode *c0,
+    void InitInterior(int axis, WideBVHBuildNode *c0,
                       WideBVHBuildNode *c1,
                       WideBVHBuildNode *c2, WideBVHBuildNode *c3) {
         children[0] = c0;
@@ -117,14 +117,15 @@ struct WideBVHBuildNode {
         children[2] = c2;
         children[3] = c3;
         bounds = Union(Union(c0->bounds, c1->bounds),Union(c2->bounds,c3->bounds));
-        splitAxis1 = axis1;
-        splitAxis2 = axis2;
+        splitAxis = axis;
         nPrimitives = 0;
         ++interiorNodes;
     }
+    int axis1() { return splitAxis & 4; } 
+    int axis2() { return splitAxis >> 2; } 
     Bounds3f bounds;
     WideBVHBuildNode *children[4];
-    int splitAxis1, splitAxis2, firstPrimOffset, nPrimitives;
+    int splitAxis, firstPrimOffset, nPrimitives;
 };
     // BVHBuildNode Definition
 struct BVHBuildNode {
@@ -151,6 +152,18 @@ struct BVHBuildNode {
     Bounds3f bounds;
     BVHBuildNode *children[2];
     int splitAxis, firstPrimOffset, nPrimitives;
+};
+// LinearBVHNode Definition
+struct alignas(32) WideLinearBVHNode {
+    Bounds3f bounds;
+    union {
+        int primitivesOffset;   // leaf
+        int childOffsets[3];  // interior
+    };
+    uint16_t nPrimitives;  // 0 -> interior node
+    uint8_t axis;          // interior node: xyz
+    inline int axis1() { return axis & 4; }
+    inline int axis2() { return axis >> 2; }
 };
 
 // LinearBVHNode Definition

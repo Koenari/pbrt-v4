@@ -25,6 +25,9 @@ struct BVHBuildNode;
 struct BVHPrimitive;
 struct LinearBVHNode;
 struct MortonPrimitive;
+enum class SplitMethod {
+    SAH, HLBVH, Middle, EqualCounts, EPO
+};
 
 // BVHAggregate Definition
 class BVHAggregate {
