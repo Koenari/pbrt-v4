@@ -23,6 +23,7 @@ struct WideBVHBuildNode;
 struct BVHBuildNode;
 struct BVHPrimitive;
 struct LinearBVHNode;
+struct WideLinearBVHNode;
 struct MortonPrimitive;
 enum class SplitMethod {
     SAH, HLBVH, Middle, EqualCounts, EPO
