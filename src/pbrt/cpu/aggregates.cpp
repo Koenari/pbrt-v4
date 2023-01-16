@@ -390,7 +390,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         case pbrt::SplitMethod::EqualCounts:
             splits[1] = bvhPrimitives.size() / 2;
             splits[0] = splits[1] / 2;
-            splits[2] = (bvhPrimitives.size() - splits[1]) / 2;
+            splits[2] = splits[1] + (bvhPrimitives.size() - splits[1]) / 2;
             std::nth_element(bvhPrimitives.begin(), bvhPrimitives.begin() + splits[1],
                              bvhPrimitives.end(),
                              [dim1](const BVHPrimitive &a, const BVHPrimitive &b) {
@@ -541,7 +541,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             break;
         }
         int splitpoints[5] = {0, splits[0], splits[1], splits[2],
-                              bvhPrimitives.size() - 1};
+                              bvhPrimitives.size()};
         WideBVHBuildNode *children[4];
         // Recursively build BVHs for _children_
         if (bvhPrimitives.size() > 128 * 1024) {
@@ -549,7 +549,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             ParallelFor(0, 4, [&](int i) {
                     children[i] = buildRecursive(
                         threadAllocators,
-                        bvhPrimitives.subspan(splitpoints[i], splitpoints[i+1]),
+                                   bvhPrimitives.subspan(splitpoints[i],
+                                          splitpoints[i + 1] - splitpoints[i]),
                                        totalNodes, orderedPrimsOffset, orderedPrims);
             });
 
@@ -558,7 +559,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             for (int i = 0; i < 4; i++) {
                 children[i] = buildRecursive(
                     threadAllocators,
-                    bvhPrimitives.subspan(splitpoints[i], splitpoints[i + 1]),
+                    bvhPrimitives.subspan(splitpoints[i],
+                                          splitpoints[i + 1] - splitpoints[i]),
                                    totalNodes, orderedPrimsOffset, orderedPrims);
             }
         }
