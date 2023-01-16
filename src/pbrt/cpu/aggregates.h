@@ -28,13 +28,44 @@ struct MortonPrimitive;
 enum class SplitMethod {
     SAH, HLBVH, Middle, EqualCounts, EPO
 };
+class WideBVHAggregate {
+  public:
+    WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
+                     SplitMethod splitMethod = SplitMethod::SAH);
+    static WideBVHAggregate *Create(std::vector<Primitive> prims,
+                                const ParameterDictionary &parameters);
+    Bounds3f Bounds() const;
+    pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const;
+    bool IntersectP(const Ray &ray, Float tMax) const;
+
+  private:
+    // WideBVHAggregate Private Methods
+    WideBVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
+                                 pstd::span<BVHPrimitive> bvhPrimitives,
+                                 std::atomic<int> *totalNodes,
+                                 std::atomic<int> *orderedPrimsOffset,
+                                 std::vector<Primitive> &orderedPrims);
+    WideBVHBuildNode *emitLBVH(WideBVHBuildNode *&buildNodes,
+                           const std::vector<BVHPrimitive> &primitiveInfo,
+                           MortonPrimitive *mortonPrims, int nPrimitives, int *totalNodes,
+                           std::vector<Primitive> &orderedPrims,
+                           std::atomic<int> *orderedPrimsOffset, int bitIndex);
+    WideBVHBuildNode *buildUpperSAH(Allocator alloc,
+                                    std::vector<WideBVHBuildNode *> &treeletRoots,
+                                    int start,
+                                int end, std::atomic<int> *totalNodes) const;
+    int flattenBVH(WideBVHBuildNode *node, int *offset);
+
+    // WideBVHAggregate Private Members
+    int maxPrimsInNode;
+    std::vector<Primitive> primitives;
+    SplitMethod splitMethod;
+    LinearBVHNode *nodes = nullptr;
+};
 
 // BVHAggregate Definition
 class BVHAggregate {
   public:
-    // BVHAggregate Public Types
-    enum class SplitMethod { SAH, HLBVH, Middle, EqualCounts };
-
     // BVHAggregate Public Methods
     BVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
                  SplitMethod splitMethod = SplitMethod::SAH);
