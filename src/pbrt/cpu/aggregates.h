@@ -19,7 +19,6 @@ namespace pbrt {
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters);
 
-struct EightWideBVHBuildNode;
 struct WideBVHBuildNode;
 struct BVHBuildNode;
 struct BVHPrimitive;
@@ -60,7 +59,7 @@ class WideBVHAggregate {
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
-    LinearBVHNode *nodes = nullptr;
+    WideLinearBVHNode *nodes = nullptr;
 };
 
 // BVHAggregate Definition

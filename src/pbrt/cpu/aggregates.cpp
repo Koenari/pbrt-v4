@@ -153,14 +153,19 @@ struct BVHBuildNode {
     BVHBuildNode *children[2];
     int splitAxis, firstPrimOffset, nPrimitives;
 };
-// LinearBVHNode Definition
+// WideLinearBVHNode Definition (Maybe can fit in 32Byte)
+// size= 39B
 struct alignas(32) WideLinearBVHNode {
+    //2*3*sizeof(float) = 24B
     Bounds3f bounds;
+    //3*sizeof(int) = 12B
     union {
         int primitivesOffset;   // leaf
-        int childOffsets[3];  // interior
+        int otherChildOffsets[3];  // interior
     };
+    //2 = 2B
     uint16_t nPrimitives;  // 0 -> interior node
+    //1 = 1B
     uint8_t axis;          // interior node: xyz
     inline int axis1() { return axis & 4; }
     inline int axis2() { return axis >> 2; }
@@ -562,6 +567,28 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
     }
 }
 
+int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
+    WideLinearBVHNode *linearNode = &nodes[*offset];
+    linearNode->bounds = node->bounds;
+    int nodeOffset = (*offset)++;
+    if (node->nPrimitives > 0) {
+        CHECK(!node->children[0] && !node->children[1] && !node->children[2] &&
+              !node->children[3]);
+        CHECK_LT(node->nPrimitives, 65536);
+        linearNode->primitivesOffset = node->firstPrimOffset;
+        linearNode->nPrimitives = node->nPrimitives;
+    } else {
+        // Create interior flattened BVH node
+        linearNode->axis = node->splitAxis;
+        linearNode->nPrimitives = 0;
+        flattenBVH(node->children[0], offset);
+        for (int i = 0; i <4;i++) {
+            linearNode->otherChildOffsets[i] = flattenBVH(node->children[i], offset);
+        }
+        
+    }
+    return nodeOffset;
+}
 BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                            pstd::span<BVHPrimitive> bvhPrimitives,
                                            std::atomic<int> *totalNodes,
