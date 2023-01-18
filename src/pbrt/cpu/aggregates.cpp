@@ -320,7 +320,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
     Bounds3f bounds;
     for (const auto &prim : bvhPrimitives)
         bounds = Union(bounds, prim.bounds);
-    if (bounds.SurfaceArea() == 0 || bvhPrimitives.size() < 4) {
+    if (bounds.SurfaceArea() == 0 || bvhPrimitives.size() <= maxPrimsInNode) {
         // Create leaf _BVHBuildNode_
         int firstPrimOffset = orderedPrimsOffset->fetch_add(bvhPrimitives.size());
         for (size_t i = 0; i < bvhPrimitives.size(); ++i) {
@@ -374,7 +374,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                            [dim2, pmid2](const BVHPrimitive &pi) {
                                                return pi.Centroid()[dim2] < pmid2;
                                            });
-            splits[0] = midIter2 - bvhPrimitives.begin();
+            splits[2] = midIter2 - bvhPrimitives.begin();
             // For lots of prims with large overlapping bounding boxes, this
             // may fail to partition; in that case do not break and fall through
             // to EqualCounts.
@@ -382,7 +382,10 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             // malformed
             bool hasError = false;
             for (int i = 0; i < 3; i++)
-                if (splits[i] == 0 || splits[i] == bvhPrimitives.size() - 1)
+                if (splits[i] == 0 || splits[i] == bvhPrimitives.size())
+                    hasError = true;
+            for (int i = 0; i < 2; i++)
+                if (splits[i] == splits[i+1])
                     hasError = true;
             if (!hasError)
                 break;
