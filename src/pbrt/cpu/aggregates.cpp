@@ -732,7 +732,7 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
         linearNode->nPrimitives = 0;
         flattenBVH(node->children[0], offset);
         for (int i = 0; i <3;i++) {
-            linearNode->otherChildOffsets[i] = flattenBVH(node->children[i], offset);
+            linearNode->otherChildOffsets[i] = flattenBVH(node->children[i+1], offset);
         }
         
     }
