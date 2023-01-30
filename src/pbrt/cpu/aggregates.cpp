@@ -353,9 +353,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         Bounds3f centroidBounds;
         for (const auto &prim : bvhPrimitives)
             centroidBounds = Union(centroidBounds, prim.Centroid());
-        std::tuple<int, int> dims = centroidBounds.MaxDimensions();
-        int dim1 = std::get<0>(dims);
-        int dim2 = std::get<1>(dims);
+        int dims = centroidBounds.MaxDimensions();
+        int dim1 = dims & 3;
+        int dim2 = (dims >> 2) &3;
         // Decide on Leaf or inner
         if (centroidBounds.pMax[dim1] == centroidBounds.pMin[dim1] &&
             centroidBounds.pMax[dim2] == centroidBounds.pMin[dim2]) {

@@ -1313,23 +1313,23 @@ class Bounds3 {
             return 2;
     }
     PBRT_CPU_GPU
-    std::tuple<int,int> MaxDimensions() const {
+    int MaxDimensions() const {
         Vector3<T> d = Diagonal();
         if (d.x > d.y && d.x > d.z) {
             if (d.y > d.z)
-                return std::tuple<int, int>(0, 1);
+                return 0b0100;
             else
-                return std::tuple<int, int>(0, 2);
+                return 0b1000;
         } else if (d.y > d.z) {
             if (d.x > d.z)
-                return std::tuple<int, int>(1, 0);
+                return 0b0001;
             else
-                return std::tuple<int, int>(1, 2);
+                return 0b1001;
         } else {
             if (d.x > d.y)
-                return std::tuple<int, int>(2, 0);
-            else 
-                return std::tuple<int, int>(2, 1);
+                return 0b0010;
+            else
+                return 0b0110;
         }
             
     }
