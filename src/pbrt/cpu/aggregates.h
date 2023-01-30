@@ -31,7 +31,7 @@ enum class SplitMethod {
 class WideBVHAggregate {
   public:
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                     SplitMethod splitMethod = SplitMethod::SAH);
+                     SplitMethod splitMethod = SplitMethod::SAH,int splitVariant = 0);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;
@@ -60,6 +60,7 @@ class WideBVHAggregate {
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
+    int splitVariant;
     WideLinearBVHNode *nodes = nullptr;
     std::atomic<int> emptyCount = 0;
 };
