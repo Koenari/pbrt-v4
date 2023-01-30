@@ -163,7 +163,7 @@ struct alignas(32) WideLinearBVHNode {
     //3*sizeof(int) = 12B
     union {
         int primitivesOffset;   // leaf
-        int otherChildOffsets[3];  // interior
+        int childOffsets[4];  // interior
     };
     //2 = 2B
     uint16_t nPrimitives;  // 0 -> interior node
@@ -171,7 +171,18 @@ struct alignas(32) WideLinearBVHNode {
     // x:0 y:1 z:2
     //mains split axis in bits 0+1
     //secondary exits in bit 2+3
+    // 7 | 6       | 5 4     | 3 2     | 1 0
+    //   | IsEmpty | axis[2] | axis[1] | axis [0]
     uint8_t axis;
+    inline uint8_t Axis0() const { return axis >> 0 & 3; }
+    inline uint8_t Axis1() const { return axis >> 2 & 3; }
+    inline uint8_t Axis2() const { return axis >> 4 & 3; }
+    inline bool  IsEmpty() const { return axis >> 6 & 1; }
+    inline uint8_t ConstructAxis(int axis0,int axis1, int axis2) const 
+    { 
+        return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4);
+    }
+    constexpr static uint8_t EmptyAxis = 0x40;
 };
     // LinearBVHNode Definition
 struct alignas(32) LinearBVHNode {
@@ -271,11 +282,13 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     primitives.swap(orderedPrims);
     // Convert BVH into compact representation in _nodes_ array
     bvhPrimitives.resize(0);
-    LOG_VERBOSE("BVH created with %d nodes for %d primitives (%.2f MB)",
+    LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
+    treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
+    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
+                float(emptyCount.load()) / float(totalNodes.load())*100.f);
     nodes = new WideLinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
@@ -313,11 +326,15 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                                     std::atomic<int> *totalNodes,
                                                     std::atomic<int> *orderedPrimsOffset,
     std::vector<Primitive> &orderedPrims) {
-    DCHECK_NE(bvhPrimitives.size(), 0);
+    ++*totalNodes;
+    if (bvhPrimitives.size() < 1) {
+        emptyCount++;
+        return nullptr;
+    }
+    
     Allocator alloc = threadAllocators.Get();
     WideBVHBuildNode *node = alloc.new_object<WideBVHBuildNode>();
     // Initialize _BVHBuildNode_ for primitive range
-    ++*totalNodes;
     // Compute bounds of all primitives in BVH node
     Bounds3f bounds;
     for (const auto &prim : bvhPrimitives)
@@ -578,20 +595,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     return b <= minCostRow;
                 });
             splits[1] = midIter - bvhPrimitives.begin();
-            if (splits[1] < 2 || splits[1] > bvhPrimitives.size() - 2) {
-                LOG_VERBOSE("Created empty split for %d priims:", bvhPrimitives.size());
-                if (splits[1] < 2)
-                    splits[1] = 2;
-                else
-                    splits[1] = bvhPrimitives.size() - 2;
-                midIter = bvhPrimitives.begin() + splits[1];
-                std::nth_element(bvhPrimitives.begin(),
-                                 bvhPrimitives.begin() + splits[1],
-                                 bvhPrimitives.end(),
-                                 [dim1](const BVHPrimitive &a, const BVHPrimitive &b) {
-                                     return a.Centroid()[dim1] < b.Centroid()[dim1];
-                                 });
-            }
             auto midIter2 = std::partition(
                 bvhPrimitives.begin(), midIter, [=](const BVHPrimitive &bp) {
                     int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim2];
@@ -600,18 +603,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     return b <= minCostColAbove;
                 }); 
             splits[0] = midIter2 - bvhPrimitives.begin();
-            LOG_VERBOSE("Created empty split for %d prims", splits[1]);
-            if (splits[0] == 0 || splits[0] == splits[1]) {
-                if (splits[0] == 0)
-                    splits[0] = 1;
-                else
-                    splits[0] = splits[1]-1;
-                std::nth_element(bvhPrimitives.begin(), bvhPrimitives.begin() + splits[0],
-                                 bvhPrimitives.begin() + splits[1],
-                                 [dim2](const BVHPrimitive &a, const BVHPrimitive &b) {
-                                     return a.Centroid()[dim2] < b.Centroid()[dim2];
-                                 });
-            }
             midIter2 = std::partition(
                 midIter, bvhPrimitives.end(), [=](const BVHPrimitive &bp) {
                     int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim2];
@@ -620,18 +611,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     return b <= minCostColBelow;
                 });
             splits[2] = midIter2 - bvhPrimitives.begin();
-            if (splits[2] == splits[1] || splits[2] == bvhPrimitives.size()) {
-                LOG_VERBOSE("Created empty split for %d prims", bvhPrimitives.size() - splits[1]);
-                if (splits[2] == splits[1])
-                    splits[2] = splits[1]+1;
-                else
-                    splits[2] = bvhPrimitives.size() - 1;
-                std::nth_element(bvhPrimitives.begin() + splits[1],
-                                 bvhPrimitives.begin() + splits[2], bvhPrimitives.end(),
-                                 [dim2](const BVHPrimitive &a, const BVHPrimitive &b) {
-                                     return a.Centroid()[dim2] < b.Centroid()[dim2];
-                                 });
-            }
             CHECK(splits[0] || splits[1] || splits[2]);
             break;
         }
@@ -784,7 +763,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         ++nodesVisited;
         const WideLinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
-        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+        if (!node->IsEmpty()
+            && node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
                 // Intersect ray with primitives in leaf BVH node
                 for (int i = 0; i < node->nPrimitives; ++i) {
@@ -801,40 +781,21 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
 
             } else {
-                //traversal optimization depending on ray direction 
-                //if axis1 isneg children[2] [3] first else children [0] [1]
-                // for axis2 depends if swap the children for secondary axis
-                //maybe do some math instead or just inline the for
-                int visitOffsets[4]{};
-                if (dirIsNeg[node->axis & 4]) {
-                    if (dirIsNeg[node->axis >> 2]) {
-                        visitOffsets[0] = node->otherChildOffsets[2];
-                        visitOffsets[1] = node->otherChildOffsets[1];
-                        visitOffsets[2] = node->otherChildOffsets[0];
-                        visitOffsets[3] = currentNodeIndex + 1;
+                //potential Concurrency issue
+                std::atomic<bool> first = true;
+                int idx;
+                for (int i = 0; i < 4; i++) {
+                    // traversal optimization depending on ray direction 
+                    idx =  ((i >> 1) ^ dirIsNeg[node->Axis1()]) ? 2 : 0;
+                    idx += !(i >> 1) && (i & 1) ^ dirIsNeg[node->Axis0()] ? 1 : 0;
+                    idx +=  (i >> 1) && (i & 1) ^ dirIsNeg[node->Axis2()] ? 1 : 0;
+                    if (first) {
+                        currentNodeIndex = node->childOffsets[idx];
+                        first = false;
                     } else {
-                        visitOffsets[0] = node->otherChildOffsets[1];
-                        visitOffsets[1] = node->otherChildOffsets[2];
-                        visitOffsets[2] = currentNodeIndex + 1;
-                        visitOffsets[3] = node->otherChildOffsets[0];
-                    }
-                } else {
-                    if (dirIsNeg[node->axis >> 2]) {
-                        visitOffsets[0] = node->otherChildOffsets[0];
-                        visitOffsets[1] = currentNodeIndex + 1;
-                        visitOffsets[2] = node->otherChildOffsets[2];
-                        visitOffsets[3] = node->otherChildOffsets[1];
-                    } else {
-                        visitOffsets[0] = currentNodeIndex + 1;
-                        visitOffsets[1] = node->otherChildOffsets[0];
-                        visitOffsets[2] = node->otherChildOffsets[1];
-                        visitOffsets[3] = node->otherChildOffsets[2];
-                    }
+                        nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
+                    }        
                 }
-                currentNodeIndex = visitOffsets[0];
-                for (int i = 1; i < 4; i++) {
-                        nodesToVisit[toVisitOffset++] = visitOffsets[i];
-                    }
             }
         } else {
             if (toVisitOffset == 0)
@@ -860,7 +821,8 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     while (true) {
         ++nodesVisited;
         const WideLinearBVHNode *node = &nodes[currentNodeIndex];
-        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+        if (!node->IsEmpty()
+            && node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             // Process BVH node _node_ for traversal
             if (node->nPrimitives > 0) {
                 for (int i = 0; i < node->nPrimitives; ++i) {
@@ -873,40 +835,17 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
                     break;
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
             } else {
-                // traversal optimization depending on ray direction
-                // if axis1 isneg children[2] [3] first else children [0] [1]
-                //  for axis2 depends if swap the children for secondary axis
-                // maybe do some math instead or just inline the for
-                int visitOffsets[4]{};
-                if (dirIsNeg[node->axis & 4]) {
-                    if (dirIsNeg[node->axis >> 2]) {
-                        visitOffsets[0] = node->otherChildOffsets[2];
-                        visitOffsets[1] = node->otherChildOffsets[1];
-                        visitOffsets[2] = node->otherChildOffsets[0];
-                        visitOffsets[3] = currentNodeIndex + 1;
-                    } else {
-                        visitOffsets[0] = node->otherChildOffsets[1];
-                        visitOffsets[1] = node->otherChildOffsets[2];
-                        visitOffsets[2] = currentNodeIndex + 1;
-                        visitOffsets[3] = node->otherChildOffsets[0];
-                    }
-                } else {
-                    if (dirIsNeg[node->axis >> 2]) {
-                        visitOffsets[0] = node->otherChildOffsets[0];
-                        visitOffsets[1] = currentNodeIndex + 1;
-                        visitOffsets[2] = node->otherChildOffsets[2];
-                        visitOffsets[3] = node->otherChildOffsets[1];
-                    } else {
-                        visitOffsets[0] = currentNodeIndex + 1;
-                        visitOffsets[1] = node->otherChildOffsets[0];
-                        visitOffsets[2] = node->otherChildOffsets[1];
-                        visitOffsets[3] = node->otherChildOffsets[2];
-                    }
-                }
-                currentNodeIndex = visitOffsets[0];
+                //Same as in for loop pre computed for i = 0
+                int idx = dirIsNeg[node->Axis1()] ? 2 : 0
+                        + dirIsNeg[node->Axis0()] ? 1 : 0;
+                currentNodeIndex = node->childOffsets[idx];
                 for (int i = 1; i < 4; i++) {
-                        nodesToVisit[toVisitOffset++] = visitOffsets[i];
-                    }
+                    // traversal optimization depending on ray direction
+                    idx = ((i >> 1) ^ dirIsNeg[node->Axis1()]) ? 2 : 0
+                        + (!(i >> 1) && (i & 1) ^ dirIsNeg[node->Axis0()] ? 1 : 0)
+                        + ((i >> 1) && (i & 1) ^ dirIsNeg[node->Axis2()] ? 1 : 0);
+                    nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
+                }
             }
         } else {
             if (toVisitOffset == 0)
@@ -919,8 +858,13 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
 }
 int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
     WideLinearBVHNode *linearNode = &nodes[*offset];
-    linearNode->bounds = node->bounds;
     int nodeOffset = (*offset)++;
+    //Create emtpy node
+    if (!node) {
+        linearNode->axis = WideLinearBVHNode::EmptyAxis;
+        return nodeOffset;
+    }
+    linearNode->bounds = node->bounds;
     if (node->nPrimitives > 0) {
         CHECK(!node->children[0] && !node->children[1] && !node->children[2] &&
               !node->children[3]);
@@ -931,9 +875,8 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
         // Create interior flattened BVH node
         linearNode->axis = node->splitAxis;
         linearNode->nPrimitives = 0;
-        flattenBVH(node->children[0], offset);
-        for (int i = 0; i <3;i++) {
-            linearNode->otherChildOffsets[i] = flattenBVH(node->children[i+1], offset);
+        for (int i = 0; i < 4;i++) {
+            linearNode->childOffsets[i] = flattenBVH(node->children[i], offset);
         }
         
     }

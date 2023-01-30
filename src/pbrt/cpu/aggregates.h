@@ -61,6 +61,7 @@ class WideBVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     WideLinearBVHNode *nodes = nullptr;
+    std::atomic<int> emptyCount = 0;
 };
 
 // BVHAggregate Definition
