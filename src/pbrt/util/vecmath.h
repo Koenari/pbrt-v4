@@ -1320,7 +1320,7 @@ class Bounds3 {
                 return std::tuple<int, int>(0, 1);
             else
                 return std::tuple<int, int>(0, 2);
-        } else if (d.y < d.z) {
+        } else if (d.y > d.z) {
             if (d.x > d.z)
                 return std::tuple<int, int>(1, 0);
             else
