@@ -288,7 +288,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
-                float(emptyCount.load()) / float(totalNodes.load())*100.f);
+                float(emptyCount.load()) / float(emptyCount.load()+ totalNodes.load())*100.f);
     nodes = new WideLinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
@@ -326,12 +326,11 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                                     std::atomic<int> *totalNodes,
                                                     std::atomic<int> *orderedPrimsOffset,
     std::vector<Primitive> &orderedPrims) {
-    ++*totalNodes;
     if (bvhPrimitives.size() < 1) {
         emptyCount++;
         return nullptr;
     }
-    
+    ++*totalNodes;
     Allocator alloc = threadAllocators.Get();
     WideBVHBuildNode *node = alloc.new_object<WideBVHBuildNode>();
     // Initialize _BVHBuildNode_ for primitive range
@@ -748,7 +747,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             return node;
         }
     }
-    pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
+pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                                                           Float tMax) const {
     if (!nodes)
         return {};
@@ -763,8 +762,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         ++nodesVisited;
         const WideLinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
-        if (!node->IsEmpty()
-            && node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
                 // Intersect ray with primitives in leaf BVH node
                 for (int i = 0; i < node->nPrimitives; ++i) {
@@ -781,20 +779,22 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
 
             } else {
-                //potential Concurrency issue
-                std::atomic<bool> first = true;
-                int idx;
-                for (int i = 0; i < 4; i++) {
-                    // traversal optimization depending on ray direction 
-                    idx =  ((i >> 1) ^ dirIsNeg[node->Axis1()]) ? 2 : 0;
-                    idx += !(i >> 1) && (i & 1) ^ dirIsNeg[node->Axis0()] ? 1 : 0;
-                    idx +=  (i >> 1) && (i & 1) ^ dirIsNeg[node->Axis2()] ? 1 : 0;
-                    if (first) {
-                        currentNodeIndex = node->childOffsets[idx];
-                        first = false;
-                    } else {
+                int i = -1, idx;
+                currentNodeIndex = -1;
+                while (currentNodeIndex < 0 && ++i < 4){
+                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
+                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
+                    currentNodeIndex = node->childOffsets[idx];
+                }
+                while (++i<4) {
+                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
+                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
+                    if (node->childOffsets[idx] > -1)
                         nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
-                    }        
                 }
             }
         } else {
@@ -835,15 +835,22 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
                     break;
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
             } else {
-                //Same as in for loop pre computed for i = 0
-                int idx = dirIsNeg[node->Axis1()] ? 2 : 0
-                        + dirIsNeg[node->Axis0()] ? 1 : 0;
-                currentNodeIndex = node->childOffsets[idx];
-                for (int i = 1; i < 4; i++) {
-                    // traversal optimization depending on ray direction
-                    idx = ((i >> 1) ^ dirIsNeg[node->Axis1()]) ? 2 : 0
-                        + (!(i >> 1) && (i & 1) ^ dirIsNeg[node->Axis0()] ? 1 : 0)
-                        + ((i >> 1) && (i & 1) ^ dirIsNeg[node->Axis2()] ? 1 : 0);
+                int i = -1, idx;
+                currentNodeIndex = -1;
+                //First non empty child
+                while (currentNodeIndex < 0 && ++i < 4) {
+                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
+                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
+                    currentNodeIndex = node->childOffsets[idx];
+                }
+                //Other Children
+                while (++i < 4) {
+                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
+                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
+                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
                     nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
                 }
             }
@@ -857,13 +864,12 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     return false;
 }
 int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
+    // Create emtpy node
+    if (!node) {
+        return -1;
+    }
     WideLinearBVHNode *linearNode = &nodes[*offset];
     int nodeOffset = (*offset)++;
-    //Create emtpy node
-    if (!node) {
-        linearNode->axis = WideLinearBVHNode::EmptyAxis;
-        return nodeOffset;
-    }
     linearNode->bounds = node->bounds;
     if (node->nPrimitives > 0) {
         CHECK(!node->children[0] && !node->children[1] && !node->children[2] &&
