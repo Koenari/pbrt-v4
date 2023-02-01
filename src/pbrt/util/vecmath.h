@@ -1317,19 +1317,19 @@ class Bounds3 {
         Vector3<T> d = Diagonal();
         if (d.x > d.y && d.x > d.z) {
             if (d.y > d.z)
-                return 0b0100;
+                return 0b100100;
             else
-                return 0b1000;
+                return 0b011000;
         } else if (d.y > d.z) {
             if (d.x > d.z)
-                return 0b0001;
+                return 0b100001;
             else
-                return 0b1001;
+                return 0b001001;
         } else {
             if (d.x > d.y)
-                return 0b0010;
+                return 0b010010;
             else
-                return 0b0110;
+                return 0b000110;
         }
             
     }
