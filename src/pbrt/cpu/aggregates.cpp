@@ -125,6 +125,15 @@ struct WideBVHBuildNode {
     }
     Bounds3f bounds;
     WideBVHBuildNode *children[4];
+    int numChildren() const 
+    { 
+        int count = 0;
+        for (int i = 0; i<4;++i) {
+            if (children[i])
+                count++;
+        }
+        return count;
+    };
     int splitAxis[3];
     int firstPrimOffset, nPrimitives;
 };
@@ -247,7 +256,7 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
 }
 
 WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                                   SplitMethod splitMethod, int splitVariant)
+                                   SplitMethod splitMethod, int splitVariant, CreationMethod method)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
       splitMethod(splitMethod), splitVariant(splitVariant) {
@@ -312,7 +321,7 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
         splitMethod = SplitMethod::SAH;
     }
 
-    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
+    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant);
 }
@@ -437,7 +446,113 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                              });
             break;
         }
-        case pbrt::SplitMethod::EPO:
+        case pbrt::SplitMethod::EPO: {
+            switch (splitVariant) {
+            default:
+                for (int i = 0; i < 3; i++) {
+                    // Consider leaf only for whole node
+                    bool leafAllowed = i == 0;
+                    int mid;
+                    // int dim = i == 0 ? dim1 : dim2;
+                    float alpha = 0.5f;
+                    int count =
+                        i == 0 ? bvhPrimitives.size()
+                               : (i == 1 ? splits[1] : bvhPrimitives.size() - splits[1]);
+                    pstd::span<BVHPrimitive> currentPrimitives =
+                        bvhPrimitives.subspan(i == 2 ? splits[1] : 0, count);
+                    Bounds3f curCentroidBounds;
+                    for (const auto &prim : currentPrimitives)
+                        curCentroidBounds = Union(curCentroidBounds, prim.Centroid());
+                    int dim = curCentroidBounds.MaxDimension();
+                    // Compute Splits on local subset
+                    //  Allocate _BVHSplitBucket_ for SAH partition buckets
+                    constexpr int nBuckets = 12;
+                    BVHSplitBucket buckets[nBuckets];
+                    // Initialize _BVHSplitBucket_ for SAH partition buckets
+                    for (const auto &prim : currentPrimitives) {
+                        int b = nBuckets * centroidBounds.Offset(prim.Centroid())[dim];
+                        if (b == nBuckets)
+                            b = nBuckets - 1;
+                        DCHECK_GE(b, 0);
+                        DCHECK_LT(b, nBuckets);
+                        buckets[b].count++;
+                        buckets[b].bounds = Union(buckets[b].bounds, prim.bounds);
+                    }
+                    // Compute costs for splitting after each bucket
+                    constexpr int nSplits = nBuckets - 1;
+                    float epoCosts[nSplits] = {};
+                    float sahCosts[nSplits] = {};
+                    // Partially initialize _costs_ using a forward scan over splits
+                    
+                    Bounds3f boundsBelow[nSplits];
+                    int countsBelow[nSplits];
+                    boundsBelow[0] = buckets[0].bounds;
+                    countsBelow[0] = buckets[0].count;
+                    for (int i = 1; i < nSplits; ++i) {
+                        boundsBelow[i] = Union(boundsBelow[i-1], buckets[i].bounds);
+                        countsBelow[i] = countsBelow[i - 1] + buckets[i].count;
+                    }
+                    // Finish initializing _costs_ using a backwards scan over splits
+                    Bounds3f boundsAbove[nSplits];
+                    int countsAbove[nSplits];
+                    boundsAbove[nSplits - 1] = buckets[nSplits].bounds;
+                    countsAbove[nSplits - 1] = buckets[nSplits].count;
+                    for (int i = nSplits-1; i >= 1; --i) {
+                        boundsAbove[i - 1] = Union(boundsAbove[i], buckets[i-1].bounds);
+                        countsAbove[i - 1] = countsAbove[i] + buckets[i - 1].count;
+                    }
+                    for (int i = 0; i < nSplits; ++i) {
+                        epoCosts[i] = pbrt::Intersect(boundsBelow[i], boundsAbove[i]).SurfaceArea();
+                        sahCosts[i] = countsBelow[i] * boundsBelow[i].SurfaceArea() + countsAbove[i] * boundsAbove[i].SurfaceArea();
+                    }
+                    // Find bucket to split at that minimizes SAH metric
+                    int minCostSplitBucket = -1;
+                    Float minCost = Infinity;
+                    for (int i = 0; i < nSplits; ++i) {
+                        // Compute cost for candidate split and update minimum if
+                        // necessary
+                        float cost = alpha * epoCosts[i] + (1 - alpha) * sahCosts[i];
+                        if (cost < minCost) {
+                            minCost = cost;
+                            minCostSplitBucket = i;
+                        }
+                    }
+                    // Consider leaf only for first iteration
+                    if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
+                        // Compute leaf cost and SAH split cost for chosen split
+                        Float leafCost = count;
+                        minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
+                        if (leafCost <= minCost) {
+                            int firstPrimOffset = orderedPrimsOffset->fetch_add(count);
+                            for (size_t i = 0; i < count; ++i) {
+                                int index = currentPrimitives[i].primitiveIndex;
+                                orderedPrims[firstPrimOffset + i] = primitives[index];
+                            }
+                            node->InitLeaf(firstPrimOffset, count, bounds);
+                            return node;
+                        }
+                    }
+                    auto midIter = std::partition(
+                        currentPrimitives.begin(), currentPrimitives.end(),
+                        [=](const BVHPrimitive &bp) {
+                            int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim];
+                            if (b == nBuckets)
+                                b = nBuckets - 1;
+                            return b <= minCostSplitBucket;
+                        });
+                    mid = midIter - currentPrimitives.begin();
+
+                    // Translate local split into offsets in complete bvhPrims
+                    // last iterations subset begins at splits[1]
+                    int offsetInBVHPrims = i == 2 ? splits[1] : 0;
+                    // 1,0,2
+                    int splitNr = i == 0 ? 1 : (i == 1 ? 0 : 2);
+                    splits[splitNr] = offsetInBVHPrims + mid;
+                    axis[splitNr] = dim;
+                }
+            break;
+        }
+        }
             break;
         case pbrt::SplitMethod::SAH: 
         default:
@@ -663,33 +778,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             dim1Below[i][col].count + buckets[i][col].count;
                     }
                 }
-                // Additionally consider splits wehre dim2 is used first
-                if (false) {
-                    BVHSplitBucket dim2Left[nBuckets][nSplits] = {};
-                    BVHSplitBucket dim2Right[nBuckets][nSplits] = {};
-                    // Compute costs for potential splits
-                    // Compute dimensions independent
-                    // For each column precompute rows O(2 * nBuckets * (nBuckets-1))
-                    for (int row = 0; row < nBuckets; ++row) {
-                        // precompute left
-                        dim2Left[row][0] = buckets[row][0];
-                        for (int col = 1; col < nSplits; ++col) {
-                            dim2Left[row][col].bounds = Union(
-                                dim2Left[row][col - 1].bounds, buckets[row][col].bounds);
-                            dim2Left[row][col].count =
-                                dim1Above[row][col - 1].count + buckets[row][col].count;
-                        }
-                        // precompute right
-                        dim2Right[row][nSplits - 1] = buckets[row][nSplits];
-                        for (int col = nSplits - 1; col >= 1; --col) {
-                            dim2Right[row][col - 1].bounds = Union(
-                                dim2Right[row][col].bounds, buckets[row][col].bounds);
-                            dim2Right[row][col - 1].count =
-                                dim2Right[row][col].count + buckets[row][col].count;
-                        }
-                    }
-                }
-
                 // Compute costs for splits above(rows < splitRow) by summing precomputed
                 // values
                 for (int row = 0; row < nSplits; row++) {
@@ -908,13 +996,13 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         }
         CHECK_LE(splits[0], splits[1]);
         CHECK_LE(splits[1], splits[2]);
-        int splitpoints[5] = {0, splits[0], splits[1], splits[2],
+        size_t splitpoints[5] = {0, splits[0], splits[1], splits[2],
                                 bvhPrimitives.size()};
-        WideBVHBuildNode *children[4];
+        WideBVHBuildNode *children[TreeWidth];
         // Recursively build BVHs for _children_
         if (bvhPrimitives.size() > 128 * 1024) {
             // Recursively build child BVHs in parallel
-            ParallelFor(0, 4, [&](int i) {
+            ParallelFor(0, TreeWidth, [&](int i) {
                     children[i] = buildRecursive(
                         threadAllocators,
                         bvhPrimitives.subspan(splitpoints[i],
@@ -924,7 +1012,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
 
         } else {
             // Recursively build child BVHs sequentially
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < TreeWidth; i++) {
                     children[i] = buildRecursive(
                         threadAllocators,
                         bvhPrimitives.subspan(splitpoints[i],
@@ -954,7 +1042,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
                 // Intersect ray with primitives in leaf BVH node
-                for (int i = 0; i < node->nPrimitives; ++i) {
+                for (size_t i = 0; i < node->nPrimitives; ++i) {
                     // Check for intersection with primitive in BVH node
                     pstd::optional<ShapeIntersection> primSi =
                         primitives[node->primitivesOffset + i].Intersect(ray, tMax);
@@ -968,22 +1056,24 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
 
             } else {
-                int i = -1, idx;
+                int i = -1;
                 currentNodeIndex = -1;
-                while (currentNodeIndex < 0 && ++i < 4){
-                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
+                const int *idxArr =
+                    traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
+                                  [dirIsNeg[node->Axis2()]];
+                //MAth below for dirNeg n | y
+                /*
+                * idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
                           ((i & 1) ^ dirIsNeg[node->Axis0()]) -
                           ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
                           ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
-                    currentNodeIndex = node->childOffsets[idx];
+                */
+                while (currentNodeIndex < 0 && ++i < TreeWidth){
+                    currentNodeIndex = node->childOffsets[idxArr[i]];
                 }
-                while (++i<4) {
-                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
-                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
-                    if (node->childOffsets[idx] > -1)
-                        nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
+                while (++i<TreeWidth) {
+                    if (node->childOffsets[idxArr[i]] > -1)
+                        nodesToVisit[toVisitOffset++] = node->childOffsets[idxArr[i]];
                 }
             }
         } else {
@@ -1027,7 +1117,7 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
                 int i = -1, idx;
                 currentNodeIndex = -1;
                 //First non empty child
-                while (currentNodeIndex < 0 && ++i < 4) {
+                while (currentNodeIndex < 0 && ++i < TreeWidth) {
                     idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
                           ((i & 1) ^ dirIsNeg[node->Axis0()]) -
                           ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
@@ -1035,7 +1125,7 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
                     currentNodeIndex = node->childOffsets[idx];
                 }
                 //Other Children
-                while (++i < 4) {
+                while (++i < TreeWidth) {
                     idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
                           ((i & 1) ^ dirIsNeg[node->Axis0()]) -
                           ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
@@ -1071,7 +1161,7 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
         linearNode->axis = linearNode->ConstructAxis(
             node->splitAxis[0], node->splitAxis[1], node->splitAxis[2]);
         linearNode->nPrimitives = 0;
-        for (int i = 0; i < 4;i++) {
+        for (int i = 0; i < TreeWidth; i++) {
             linearNode->childOffsets[i] = flattenBVH(node->children[i], offset);
         }
         
@@ -1349,7 +1439,7 @@ BVHBuildNode *BVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
         ++*totalNodes;
         BVHBuildNode *node = buildNodes++;
         Bounds3f bounds;
-        int firstPrimOffset = orderedPrimsOffset->fetch_add(nPrimitives);
+        size_t firstPrimOffset = orderedPrimsOffset->fetch_add(nPrimitives);
         for (int i = 0; i < nPrimitives; ++i) {
             int primitiveIndex = mortonPrims[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[primitiveIndex];

@@ -30,8 +30,9 @@ enum class SplitMethod {
 };
 class WideBVHAggregate {
   public:
+    enum class CreationMethod {Direct, FromBVH};
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                     SplitMethod splitMethod = SplitMethod::SAH,int splitVariant = 0);
+                     SplitMethod splitMethod = SplitMethod::SAH,int splitVariant = 0, CreationMethod method = CreationMethod::Direct);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;
@@ -45,15 +46,6 @@ class WideBVHAggregate {
                                  std::atomic<int> *totalNodes,
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims);
-    WideBVHBuildNode *emitLBVH(WideBVHBuildNode *&buildNodes,
-                           const std::vector<BVHPrimitive> &primitiveInfo,
-                           MortonPrimitive *mortonPrims, int nPrimitives, int *totalNodes,
-                           std::vector<Primitive> &orderedPrims,
-                           std::atomic<int> *orderedPrimsOffset, int bitIndex);
-    WideBVHBuildNode *buildUpperSAH(Allocator alloc,
-                                    std::vector<WideBVHBuildNode *> &treeletRoots,
-                                    int start,
-                                int end, std::atomic<int> *totalNodes) const;
     int flattenBVH(WideBVHBuildNode *node, int *offset);
 
     // WideBVHAggregate Private Members
@@ -61,7 +53,12 @@ class WideBVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     int splitVariant;
+    static constexpr int TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
+    int traversalOrder[2][2][2][4] = {
+        {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},
+        {{{1, 0, 2, 3}, {1, 0, 3, 2}}, {{3, 2, 0, 1}, {3, 2, 1, 0}}}};
+    ;
     std::atomic<int> emptyCount = 0;
 };
 
