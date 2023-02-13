@@ -47,7 +47,8 @@ class WideBVHAggregate {
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims);
     int flattenBVH(WideBVHBuildNode *node, int *offset);
-
+    bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes);
+    static int getRelevantAxisIdx(int child1Idx, int child2Idx);
     // WideBVHAggregate Private Members
     int maxPrimsInNode;
     std::vector<Primitive> primitives;

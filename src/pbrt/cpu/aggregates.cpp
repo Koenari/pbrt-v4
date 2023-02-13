@@ -293,10 +293,17 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
+    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
+        float(emptyCount.load()) / float(emptyCount.load() + totalNodes.load()) * 100.f);
+    optimizeTree(root, &totalNodes);
+    LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
+                totalNodes.load(), (int)primitives.size(),
+                float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
+    LOG_VERBOSE(
+        "Optimized WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
+        float(emptyCount.load()) / float(emptyCount.load() + totalNodes.load()) * 100.f);
     treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
-    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
-                float(emptyCount.load()) / float(emptyCount.load()+ totalNodes.load())*100.f);
     nodes = new WideLinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
@@ -329,6 +336,157 @@ Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
     return nodes[0].bounds;
 }
+int WideBVHAggregate::getRelevantAxisIdx(int child1Idx, int child2Idx) {
+    if (child1Idx == child2Idx)
+        return -1;
+    if (child2Idx < child1Idx) {
+        int temp = child1Idx;
+        child1Idx = child2Idx;
+        child2Idx = temp;
+    }
+    if (child2Idx > 3)
+        return -1;
+    if (child2Idx - child1Idx == 1)
+        return child1Idx;
+    if (child2Idx - child1Idx > 1)
+        return 1;
+    return -1;
+};
+
+bool WideBVHAggregate::optimizeTree(
+    WideBVHBuildNode *root, std::atomic<int> *totalNodes) {
+    bool didOptimize = false;
+    auto mergeChildrenIntoParent = [this,totalNodes](WideBVHBuildNode *parent) {
+        bool opmiziationDone = false;
+        for (int mergedChildIdx = 0; mergedChildIdx < TreeWidth; ++mergedChildIdx) {
+            auto child = parent->children[mergedChildIdx];
+            if (child == NULL || child->nPrimitives > 0)
+                continue;
+            if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth) {
+                emptyCount -= (TreeWidth-1);
+                --*totalNodes;
+                opmiziationDone = true;
+                parent->children[mergedChildIdx] = NULL;
+                WideBVHBuildNode *newChildren[4]{NULL};
+                int newAxis[4]{0};
+                int lastParIdx = -1;
+                int curIdx = 0;
+                for (int parIdx = 0; parIdx < mergedChildIdx; ++parIdx) {
+                    if (!parent->children[parIdx])
+                        continue;
+                    DCHECK_GE(parent->children[parIdx]->nPrimitives, -1);
+                    DCHECK_LT(curIdx, TreeWidth);
+                    newChildren[curIdx] = parent->children[parIdx];
+                    if (lastParIdx >= 0) {
+                        newAxis[curIdx - 1] =
+                            parent->splitAxis[getRelevantAxisIdx(
+                                lastParIdx, parIdx)];
+                    }
+                    lastParIdx = parIdx;
+                    curIdx++;
+                }
+                if (curIdx > 0)
+                    newAxis[curIdx - 1] = parent->splitAxis[getRelevantAxisIdx(
+                        lastParIdx, mergedChildIdx)];
+                int lastChildIdx = -1;
+                for (int childIdx = 0; childIdx < TreeWidth; ++childIdx) {
+                    if (!child->children[childIdx])
+                        continue;
+                    DCHECK_GE(child->children[childIdx]->nPrimitives, -1);
+                    DCHECK_LT(curIdx, TreeWidth);
+                    newChildren[curIdx] = child->children[childIdx];
+                    if (lastChildIdx >= 0) {
+                        newAxis[curIdx - 1] =
+                            child->splitAxis[getRelevantAxisIdx(lastChildIdx, childIdx)];
+                    }
+                    lastChildIdx = childIdx;
+                    curIdx++;
+                }
+                lastParIdx = mergedChildIdx;
+                for (int parIdx = mergedChildIdx + 1; parIdx < TreeWidth; ++parIdx) {
+                    if (!parent->children[parIdx])
+                        continue;
+                    DCHECK_GE(parent->children[parIdx]->nPrimitives, -1);
+                    DCHECK_LT(curIdx, TreeWidth);
+                    newChildren[curIdx] = parent->children[parIdx];
+                    if (lastParIdx >= 0) {
+                        newAxis[curIdx - 1] =
+                            parent->splitAxis[getRelevantAxisIdx(lastParIdx, parIdx)];
+                    }
+                    lastParIdx = parIdx;
+                    curIdx++;
+                }
+                DCHECK_LE(curIdx, TreeWidth);
+                DCHECK_LT(lastParIdx, TreeWidth);
+                DCHECK_LT(lastChildIdx, TreeWidth);
+                for (int i = 0; i < TreeWidth; ++i) {
+                    parent->children[i] = newChildren[i];
+                }
+                for (int i = 0; i < TreeWidth-1; ++i) {
+                    parent->splitAxis[i] = newAxis[i];
+                }
+                mergedChildIdx = - 1;
+            }
+        }
+        return opmiziationDone;
+    };
+    //Will not implement for now as there is no benefit for now
+    auto mergeLeafChildren = [](WideBVHBuildNode *node) {};
+    auto mergeInnerNodeChildren = [](WideBVHBuildNode *parent) {
+        int bestI = -1, bestJ = -1;
+        float maxReduction = -1;
+        while (true) {
+            for (int i = 0; i < TreeWidth; ++i) {
+                auto child1 = parent->children[i];
+                if (!child1)
+                    continue;
+                for (int j = i + 1; j < TreeWidth; ++j) {
+                    auto child2 = parent->children[j];
+                    if (!child2)
+                        continue;
+                    if (child1->numChildren() + child2->numChildren() <= TreeWidth) {
+                        Bounds3f newBounds = Union(child1->bounds, child2->bounds);
+                        float SAChange = child1->bounds.SurfaceArea() +
+                                       child2->bounds.SurfaceArea() -
+                                       newBounds.SurfaceArea();
+                        if (SAChange > maxReduction) {
+                            maxReduction = SAChange;
+                            bestI = i;
+                            bestJ = j;
+                        }
+                    }
+                }
+            }
+            if (maxReduction <= 0)
+                return;
+            
+            auto newNode = parent->children[bestI];
+            auto toMerge = parent->children[bestJ];
+            int j = 0;
+            for (int i = 0; i < TreeWidth; ++i) {
+                if (!newNode->children[i]) {
+                    while (!toMerge->children[j]) {
+                        ++j;
+                    }
+                    newNode->children[i] = toMerge->children[j];
+                }
+            }
+            parent->children[bestJ] = nullptr;
+        }
+    };
+
+    bool didOptimizeThisRound = false;
+
+    do {
+        didOptimizeThisRound = false;
+        didOptimizeThisRound |= mergeChildrenIntoParent(root);
+        for (int i = 0; i < TreeWidth; ++i)
+            if (root->children[i])
+                didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes);
+        didOptimize |= didOptimizeThisRound;
+    } while (didOptimizeThisRound);
+    return didOptimize;
+};
 
 WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                                     pstd::span<BVHPrimitive> bvhPrimitives,
