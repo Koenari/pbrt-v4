@@ -31,8 +31,17 @@ enum class SplitMethod {
 class WideBVHAggregate {
   public:
     enum class CreationMethod {Direct, FromBVH};
-    WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                     SplitMethod splitMethod = SplitMethod::SAH,int splitVariant = 0, CreationMethod method = CreationMethod::Direct);
+    enum OptimizationStrategy : unsigned char {
+        None = 0,
+        MergeIntoParent = 1,
+        MergeInnerChildren = 2,
+        MergeLeaves = 4,
+        All = 0xFF,
+    };
+    WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
+        SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
+        CreationMethod method = CreationMethod::Direct, 
+        OptimizationStrategy = OptimizationStrategy::All);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;
@@ -47,20 +56,20 @@ class WideBVHAggregate {
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims);
     int flattenBVH(WideBVHBuildNode *node, int *offset);
-    bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes);
+    bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
     static int getRelevantAxisIdx(int child1Idx, int child2Idx);
+    WideBVHBuildNode *buildFromBVH(BVHBuildNode *root);
     // WideBVHAggregate Private Members
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     int splitVariant;
-    static constexpr int TreeWidth = 4;
+    static constexpr uint32_t TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
     int traversalOrder[2][2][2][4] = {
         {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},
         {{{1, 0, 2, 3}, {1, 0, 3, 2}}, {{3, 2, 0, 1}, {3, 2, 1, 0}}}};
     ;
-    std::atomic<int> emptyCount = 0;
 };
 
 // BVHAggregate Definition
@@ -68,7 +77,7 @@ class BVHAggregate {
   public:
     // BVHAggregate Public Methods
     BVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                 SplitMethod splitMethod = SplitMethod::SAH);
+                 SplitMethod splitMethod = SplitMethod::SAH, bool skipCreation = true);
 
     static BVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
@@ -76,14 +85,13 @@ class BVHAggregate {
     Bounds3f Bounds() const;
     pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const;
     bool IntersectP(const Ray &ray, Float tMax) const;
-
-  private:
-    // BVHAggregate Private Methods
     BVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                  pstd::span<BVHPrimitive> bvhPrimitives,
                                  std::atomic<int> *totalNodes,
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims);
+  private:
+    // BVHAggregate Private Methods
     BVHBuildNode *buildHLBVH(Allocator alloc,
                              const std::vector<BVHPrimitive> &primitiveInfo,
                              std::atomic<int> *totalNodes,

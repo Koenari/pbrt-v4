@@ -23,6 +23,7 @@ namespace pbrt {
 STAT_MEMORY_COUNTER("Memory/BVH", treeBytes);
 STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
+STAT_COUNTER("BVH/Empty nodes", emptyNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
 
@@ -114,9 +115,12 @@ struct WideBVHBuildNode {
         children[1] = c[1];
         children[2] = c[2];
         children[3] = c[3];
-        for (int i = 0; i < 4;++i)
+        for (int i = 0; i < 4; ++i) {
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
+            else
+                emptyNodes++;
+        }
         splitAxis[0] = a[0];
         splitAxis[1] = a[1];
         splitAxis[2] = a[2];
@@ -205,7 +209,7 @@ struct alignas(32) LinearBVHNode {
 
 // BVHAggregate Method Definitions
 BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                           SplitMethod splitMethod)
+                           SplitMethod splitMethod, bool skipCreation)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
       splitMethod(splitMethod) {
@@ -215,7 +219,8 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
     for (size_t i = 0; i < primitives.size(); ++i)
         bvhPrimitives[i] = BVHPrimitive(i, primitives[i].Bounds());
-
+    if (skipCreation)
+        return;
     // Build BVH for primitives using _bvhPrimitives_
     // Declare _Allocator_s used for BVH construction
     pstd::pmr::monotonic_buffer_resource resource;
@@ -256,7 +261,8 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
 }
 
 WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                                   SplitMethod splitMethod, int splitVariant, CreationMethod method)
+                                   SplitMethod splitMethod, int splitVariant,
+                                   CreationMethod method, OptimizationStrategy opti)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
       splitMethod(splitMethod), splitVariant(splitVariant) {
@@ -280,11 +286,25 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     });
     std::vector<Primitive> orderedPrims(primitives.size());
     WideBVHBuildNode *root;
-    // Build BVH according to selected _splitMethod_
     std::atomic<int> totalNodes{0};
     std::atomic<int> orderedPrimsOffset{0};
-    root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
-                            &totalNodes, &orderedPrimsOffset, orderedPrims);
+    if (method == CreationMethod::FromBVH) {
+        BVHAggregate *binTree =
+            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
+        BVHBuildNode *binRoot = binTree->buildRecursive(
+            threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodes,
+            &orderedPrimsOffset, orderedPrims);
+        root = buildFromBVH(binRoot);
+        if(opti == None)
+            opti = OptimizationStrategy::All;
+    } else {
+        root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
+                              &totalNodes, &orderedPrimsOffset, orderedPrims);
+    }
+    
+    // Build BVH according to selected _splitMethod_
+    
+    
     CHECK_EQ(orderedPrimsOffset.load(), orderedPrims.size());
     
     primitives.swap(orderedPrims);
@@ -293,15 +313,14 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
-        float(emptyCount.load()) / float(emptyCount.load() + totalNodes.load()) * 100.f);
-    optimizeTree(root, &totalNodes);
+    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyNodes,
+        float(emptyNodes) / float(emptyNodes + totalNodes.load()) * 100.f);
+    optimizeTree(root, &totalNodes, opti);
     LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    LOG_VERBOSE(
-        "Optimized WideBVH contains %d empty nodes (%.1f %%)", emptyCount.load(),
-        float(emptyCount.load()) / float(emptyCount.load() + totalNodes.load()) * 100.f);
+    LOG_VERBOSE("Optimized WideBVH contains %d empty nodes (%.1f %%)", emptyNodes,
+                float(emptyNodes) / float(emptyNodes + totalNodes.load()) * 100.f);
     treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     nodes = new WideLinearBVHNode[totalNodes];
@@ -324,13 +343,38 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
     else if (splitMethodName == "equal")
         splitMethod = SplitMethod::EqualCounts;
     else {
-        Warning(R"(BVH split method "%s" unknown.  Using "sah".)", splitMethodName);
+        Warning(R"(WideBVH split method "%s" unknown.  Using "sah".)", splitMethodName);
         splitMethod = SplitMethod::SAH;
     }
-
+    std::string creationMethodName = parameters.GetOneString("creationmethod", "direct2");
+    CreationMethod creationMethod;
+    if (creationMethodName == "direct")
+        creationMethod = CreationMethod::Direct;
+    else if (creationMethodName == "frombvh")
+        creationMethod = CreationMethod::FromBVH;
+    else {
+        Warning(R"(WideBVH creation method "%s" unknown.  Using "direct".)", splitMethodName);
+        creationMethod = CreationMethod::Direct;
+    }
+    OptimizationStrategy optiStrat = OptimizationStrategy::None;
+    auto optiNames = parameters.GetStringArray("optimizations");
+    for each (auto optiName in optiNames) {
+        if (optiName == "all") {
+            optiStrat = OptimizationStrategy::All;
+            break;
+        } else if (optiName == "mergeInnerChildren")
+            optiStrat = (OptimizationStrategy)( optiStrat | OptimizationStrategy::MergeInnerChildren);
+        else if (optiName == "mergeIntoParent")
+            optiStrat = (OptimizationStrategy)(optiStrat | OptimizationStrategy::MergeIntoParent);
+        else if (optiName == "mergeLeaves")
+            optiStrat = (OptimizationStrategy)(optiStrat | OptimizationStrategy::MergeLeaves);
+        else {
+            Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
+        }
+    };
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
-    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant);
+    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
 }
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
@@ -354,7 +398,7 @@ int WideBVHAggregate::getRelevantAxisIdx(int child1Idx, int child2Idx) {
 };
 
 bool WideBVHAggregate::optimizeTree(
-    WideBVHBuildNode *root, std::atomic<int> *totalNodes) {
+    WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat) {
     bool didOptimize = false;
     auto mergeChildrenIntoParent = [this,totalNodes](WideBVHBuildNode *parent) {
         bool opmiziationDone = false;
@@ -363,7 +407,7 @@ bool WideBVHAggregate::optimizeTree(
             if (child == NULL || child->nPrimitives > 0)
                 continue;
             if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth) {
-                emptyCount -= (TreeWidth-1);
+                emptyNodes -= (TreeWidth-1);
                 --*totalNodes;
                 opmiziationDone = true;
                 parent->children[mergedChildIdx] = NULL;
@@ -465,7 +509,7 @@ bool WideBVHAggregate::optimizeTree(
             int planeBetweenChildren = parent->splitAxis[getRelevantAxisIdx(bestI,bestJ)];
             auto child1 = parent->children[bestI];
             auto child2 = parent->children[bestJ];
-            emptyCount -= (TreeWidth - 1);
+            emptyNodes -= (TreeWidth - 1);
             WideBVHBuildNode *newChildren[4]{NULL};
             int newAxis[4]{0};
             int lastIdx = -1;
@@ -513,14 +557,40 @@ bool WideBVHAggregate::optimizeTree(
 
     do {
         didOptimizeThisRound = false;
-        didOptimizeThisRound |= mergeChildrenIntoParent(root);
-        didOptimizeThisRound |= mergeInnerNodeChildren(root);
+        if (strat & OptimizationStrategy::MergeIntoParent)
+            didOptimizeThisRound |= mergeChildrenIntoParent(root);
+        if (strat & OptimizationStrategy::MergeInnerChildren)
+            didOptimizeThisRound |= mergeInnerNodeChildren(root);
         for (int i = 0; i < TreeWidth; ++i)
             if (root->children[i])
-                didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes);
+                didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes, strat);
         didOptimize |= didOptimizeThisRound;
     } while (didOptimizeThisRound);
     return didOptimize;
+};
+
+WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot){
+    if (binRoot->nPrimitives > 0) {
+        WideBVHBuildNode *leaf = new WideBVHBuildNode();
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
+        return leaf;
+    }
+    WideBVHBuildNode *node = new WideBVHBuildNode();
+    WideBVHBuildNode *children[4]{};
+    int axis[3] = {binRoot->children[0]->splitAxis,
+                   binRoot->splitAxis, binRoot->children[1]->splitAxis};
+    for (int i = 0; i < 2; ++i) {
+        auto child = binRoot->children[i];
+        if (child->nPrimitives > 0) {
+            children[i * 2] = buildFromBVH(child);
+            children[i * 2 + 1] = NULL;
+        } else {
+            children[i * 2] = buildFromBVH(child->children[0]);
+            children[i * 2 + 1] = buildFromBVH(child->children[1]);
+        }
+    }
+    node->InitInterior(axis, children);
+    return node;
 };
 
 WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
@@ -529,7 +599,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                                     std::atomic<int> *orderedPrimsOffset,
     std::vector<Primitive> &orderedPrims) {
     if (bvhPrimitives.size() < 1) {
-        emptyCount++;
+        emptyNodes++;
         return nullptr;
     }
     ++*totalNodes;
