@@ -627,7 +627,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         for (const auto &prim : bvhPrimitives)
             centroidBounds = Union(centroidBounds, prim.Centroid());
         axis[1] = centroidBounds.MaxDimension();
-        //int dim2 = (dims >> 2) &3;
         // Decide on Leaf or inner
         if (centroidBounds.pMax[axis[1]] == centroidBounds.pMin[axis[1]]) {
             // Create leaf _BVHBuildNode_
@@ -639,7 +638,59 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
             return node;
         }
-
+        auto costFunction2 = [this](BVHSplitBucket left, BVHSplitBucket right){
+            switch (splitMethod) { 
+                case SplitMethod::SAH:
+                return left.count * left.bounds.SurfaceArea() +
+                       right.count * right.bounds.SurfaceArea();
+                case SplitMethod::EPO: {
+                float alpha = 0.5f;
+                float sahCost = left.count * left.bounds.SurfaceArea() +
+                                right.count * right.bounds.SurfaceArea();
+                float epoCost = pbrt::Intersect(left.bounds, right.bounds).SurfaceArea();
+                return alpha * epoCost + (1 - alpha) * sahCost;
+                }
+                default:
+                return 0.f;
+            };
+        };
+        auto costFunction4 = [this](BVHSplitBucket leftAbove, BVHSplitBucket rightAbove,
+                                   BVHSplitBucket leftBelow, BVHSplitBucket rightBelow) {
+            switch (splitMethod) {
+            case SplitMethod::SAH:
+                return leftAbove.count * leftAbove.bounds.SurfaceArea() +
+                       rightAbove.count * rightAbove.bounds.SurfaceArea() +
+                       leftBelow.count * leftBelow.bounds.SurfaceArea() +
+                       rightBelow.count * rightBelow.bounds.SurfaceArea();
+            case SplitMethod::EPO: {
+                float alpha = 0.5f;
+                float sahCost = leftAbove.count * leftAbove.bounds.SurfaceArea() +
+                                rightAbove.count * rightAbove.bounds.SurfaceArea() +
+                                leftBelow.count * leftBelow.bounds.SurfaceArea() +
+                                rightBelow.count * rightBelow.bounds.SurfaceArea();
+                float epoCost =
+                    pbrt::Intersect(leftAbove.bounds,
+                                    Union(rightAbove.bounds,
+                                          Union(leftBelow.bounds, rightBelow.bounds)))
+                        .SurfaceArea() +
+                    pbrt::Intersect(rightAbove.bounds,
+                                    Union(leftAbove.bounds,
+                                          Union(leftBelow.bounds, rightBelow.bounds)))
+                        .SurfaceArea() +
+                    pbrt::Intersect(leftBelow.bounds,
+                                    Union(rightBelow.bounds,
+                                          Union(leftAbove.bounds, rightAbove.bounds)))
+                        .SurfaceArea() +
+                    pbrt::Intersect(rightBelow.bounds,
+                                    Union(leftBelow.bounds,
+                                          Union(leftAbove.bounds, rightAbove.bounds)))
+                        .SurfaceArea();
+                return alpha * epoCost + (1 - alpha) * sahCost;
+            }
+            default:
+                return 0.f;
+            };
+        };
         // Cut in 4
         int splits[3]{};
         switch (splitMethod) {
@@ -709,114 +760,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                              });
             break;
         }
-        case pbrt::SplitMethod::EPO: {
-            switch (splitVariant) {
-            default:
-                for (int i = 0; i < 3; i++) {
-                    // Consider leaf only for whole node
-                    bool leafAllowed = i == 0;
-                    int mid;
-                    // int dim = i == 0 ? dim1 : dim2;
-                    float alpha = 0.5f;
-                    int count =
-                        i == 0 ? bvhPrimitives.size()
-                               : (i == 1 ? splits[1] : bvhPrimitives.size() - splits[1]);
-                    pstd::span<BVHPrimitive> currentPrimitives =
-                        bvhPrimitives.subspan(i == 2 ? splits[1] : 0, count);
-                    Bounds3f curCentroidBounds;
-                    for (const auto &prim : currentPrimitives)
-                        curCentroidBounds = Union(curCentroidBounds, prim.Centroid());
-                    int dim = curCentroidBounds.MaxDimension();
-                    // Compute Splits on local subset
-                    //  Allocate _BVHSplitBucket_ for SAH partition buckets
-                    constexpr int nBuckets = 12;
-                    BVHSplitBucket buckets[nBuckets];
-                    // Initialize _BVHSplitBucket_ for SAH partition buckets
-                    for (const auto &prim : currentPrimitives) {
-                        int b = nBuckets * centroidBounds.Offset(prim.Centroid())[dim];
-                        if (b == nBuckets)
-                            b = nBuckets - 1;
-                        DCHECK_GE(b, 0);
-                        DCHECK_LT(b, nBuckets);
-                        buckets[b].count++;
-                        buckets[b].bounds = Union(buckets[b].bounds, prim.bounds);
-                    }
-                    // Compute costs for splitting after each bucket
-                    constexpr int nSplits = nBuckets - 1;
-                    float epoCosts[nSplits] = {};
-                    float sahCosts[nSplits] = {};
-                    // Partially initialize _costs_ using a forward scan over splits
-                    
-                    Bounds3f boundsBelow[nSplits];
-                    int countsBelow[nSplits];
-                    boundsBelow[0] = buckets[0].bounds;
-                    countsBelow[0] = buckets[0].count;
-                    for (int i = 1; i < nSplits; ++i) {
-                        boundsBelow[i] = Union(boundsBelow[i-1], buckets[i].bounds);
-                        countsBelow[i] = countsBelow[i - 1] + buckets[i].count;
-                    }
-                    // Finish initializing _costs_ using a backwards scan over splits
-                    Bounds3f boundsAbove[nSplits];
-                    int countsAbove[nSplits];
-                    boundsAbove[nSplits - 1] = buckets[nSplits].bounds;
-                    countsAbove[nSplits - 1] = buckets[nSplits].count;
-                    for (int i = nSplits-1; i >= 1; --i) {
-                        boundsAbove[i - 1] = Union(boundsAbove[i], buckets[i-1].bounds);
-                        countsAbove[i - 1] = countsAbove[i] + buckets[i - 1].count;
-                    }
-                    for (int i = 0; i < nSplits; ++i) {
-                        epoCosts[i] = pbrt::Intersect(boundsBelow[i], boundsAbove[i]).SurfaceArea();
-                        sahCosts[i] = countsBelow[i] * boundsBelow[i].SurfaceArea() + countsAbove[i] * boundsAbove[i].SurfaceArea();
-                    }
-                    // Find bucket to split at that minimizes SAH metric
-                    int minCostSplitBucket = -1;
-                    Float minCost = Infinity;
-                    for (int i = 0; i < nSplits; ++i) {
-                        // Compute cost for candidate split and update minimum if
-                        // necessary
-                        float cost = alpha * epoCosts[i] + (1 - alpha) * sahCosts[i];
-                        if (cost < minCost) {
-                            minCost = cost;
-                            minCostSplitBucket = i;
-                        }
-                    }
-                    // Consider leaf only for first iteration
-                    if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
-                        // Compute leaf cost and SAH split cost for chosen split
-                        Float leafCost = count;
-                        minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
-                        if (leafCost <= minCost) {
-                            int firstPrimOffset = orderedPrimsOffset->fetch_add(count);
-                            for (size_t i = 0; i < count; ++i) {
-                                int index = currentPrimitives[i].primitiveIndex;
-                                orderedPrims[firstPrimOffset + i] = primitives[index];
-                            }
-                            node->InitLeaf(firstPrimOffset, count, bounds);
-                            return node;
-                        }
-                    }
-                    auto midIter = std::partition(
-                        currentPrimitives.begin(), currentPrimitives.end(),
-                        [=](const BVHPrimitive &bp) {
-                            int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim];
-                            if (b == nBuckets)
-                                b = nBuckets - 1;
-                            return b <= minCostSplitBucket;
-                        });
-                    mid = midIter - currentPrimitives.begin();
-
-                    // Translate local split into offsets in complete bvhPrims
-                    // last iterations subset begins at splits[1]
-                    int offsetInBVHPrims = i == 2 ? splits[1] : 0;
-                    // 1,0,2
-                    int splitNr = i == 0 ? 1 : (i == 1 ? 0 : 2);
-                    splits[splitNr] = offsetInBVHPrims + mid;
-                    axis[splitNr] = dim;
-                }
-                break;
-            }
-        }
-            break;
+        case pbrt::SplitMethod::EPO:
         case pbrt::SplitMethod::SAH: 
         default:
         {
@@ -842,26 +786,30 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
 
                 // Compute costs for splitting after each bucket
                 constexpr int nSplits = nBuckets - 1;
+                BVHSplitBucket bucketsAbove[nSplits];
+                BVHSplitBucket bucketsBelow[nSplits];
                 float costs[nSplits] = {};
-                float costs2[nSplits] = {};
+                //float costs2[nSplits] = {};
                 // Partially initialize _costs_ using a forward scan over splits
-                int countBelow = 0;
-                Bounds3f boundBelow;
-                for (int i = 0; i < nSplits; ++i) {
-                    boundBelow = Union(boundBelow, buckets[i].bounds);
-                    countBelow += buckets[i].count;
-                    if (countBelow > 0)
-                        costs[i] += countBelow * boundBelow.SurfaceArea();
+                bucketsBelow[0].bounds = buckets[0].bounds;
+                bucketsBelow[0].count = buckets[0].count;
+                for (int i = 1; i < nSplits; ++i) {
+                    bucketsBelow[i].bounds =
+                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
                 }
-
                 // Finish initializing _costs_ using a backwards scan over splits
-                int countAbove = 0;
-                Bounds3f boundAbove;
-                for (int i = nSplits; i >= 1; --i) {
-                    boundAbove = Union(boundAbove, buckets[i].bounds);
-                    countAbove += buckets[i].count;
-                    if (countAbove > 0)
-                        costs[i - 1] += countAbove * boundAbove.SurfaceArea();
+
+                bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
+                bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
+                for (int i = nSplits - 1; i >= 1; --i) {
+                    bucketsAbove[i - 1].bounds =
+                        Union(bucketsAbove[i].bounds, buckets[i].bounds);
+                    bucketsAbove[i - 1].count =
+                        bucketsAbove[i].count + buckets[i].count;
+                }
+                for (int i = 0; i < nSplits; ++i) {
+                    costs[i] = costFunction2(bucketsBelow[i], bucketsAbove[i]);
                 }
 
                 // Find bucket to split at that minimizes SAH metric
@@ -879,31 +827,33 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 CHECK_LT(minCostSplitBucket1, nSplits);
                 //Find bucket below other
                 //  Partially initialize _costs_ using a forward scan over splits
-                countBelow = 0;
-                boundBelow = Bounds3f();
+                bucketsBelow[0].bounds = buckets[0].bounds;
+                bucketsBelow[0].count = buckets[0].count;
                 for (int i = 0; i < minCostSplitBucket1; ++i) {
-                    boundBelow = Union(boundBelow, buckets[i].bounds);
-                    countBelow += buckets[i].count;
-                    if (countBelow > 0)
-                        costs2[i] += countBelow * boundBelow.SurfaceArea();
+                    bucketsBelow[i].bounds =
+                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
                 }
 
                 // Finish initializing _costs_ using a backwards scan over splits
-                countAbove = 0;
-                boundAbove = Bounds3f();
-                for (int i = minCostSplitBucket1; i >= 1; --i) {
-                    boundAbove = Union(boundAbove, buckets[i].bounds);
-                    countAbove += buckets[i].count;
-                    if (countAbove > 0)
-                        costs2[i - 1] += countAbove * boundAbove.SurfaceArea();
+                bucketsAbove[minCostSplitBucket1-1].bounds =
+                    buckets[minCostSplitBucket1-1].bounds;
+                bucketsAbove[minCostSplitBucket1-1].count =
+                    buckets[minCostSplitBucket1-1].count;
+                for (int i = minCostSplitBucket1-1; i >= 1; --i) {
+                    bucketsAbove[i - 1].bounds =
+                        Union(bucketsAbove[i].bounds, buckets[i - 1].bounds);
+                    bucketsAbove[i - 1].count =
+                        bucketsAbove[i].count + buckets[i - 1].count;
                 }
                 int minCostSplitBucket0 = -1;
                 Float minCost0 = Infinity;
                 for (int i = 0; i < minCostSplitBucket1; ++i) {
                     // Compute cost for candidate split and update minimum if
                     // necessary
-                    if (costs2[i] < minCost0) {
-                        minCost0 = costs2[i];
+                    float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
+                    if (cost < minCost0) {
+                        minCost0 = cost;
                         minCostSplitBucket0 = i;
                     }
                 }
@@ -911,31 +861,33 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     minCostSplitBucket0 = 0;
                 // Find bucket above first
                 //   Partially initialize _costs_ using a forward scan over splits
-                countBelow = 0;
-                boundBelow = Bounds3f();
+                bucketsBelow[minCostSplitBucket1].bounds =
+                    buckets[minCostSplitBucket1].bounds;
+                bucketsBelow[minCostSplitBucket1].count =
+                    buckets[minCostSplitBucket1].count;
                 for (int i = minCostSplitBucket1; i < nSplits; ++i) {
-                    boundBelow = Union(boundBelow, buckets[i].bounds);
-                    countBelow += buckets[i].count;
-                    if (countBelow > 0)
-                        costs2[i] += countBelow * boundBelow.SurfaceArea();
+                    bucketsBelow[i].bounds =
+                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
                 }
 
                 // Finish initializing _costs_ using a backwards scan over splits
-                countAbove = 0;
-                boundAbove = Bounds3f();
+                bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
+                bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
                 for (int i = nSplits; i > minCostSplitBucket1; --i) {
-                    boundAbove = Union(boundAbove, buckets[i].bounds);
-                    countAbove += buckets[i].count;
-                    if (countAbove > 0)
-                        costs2[i - 1] += countAbove * boundAbove.SurfaceArea();
+                    bucketsAbove[i - 1].bounds =
+                        Union(bucketsAbove[i].bounds, buckets[i - 1].bounds);
+                    bucketsAbove[i - 1].count =
+                        bucketsAbove[i].count + buckets[i - 1].count;
                 }
                 int minCostSplitBucket2 = -1;
                 Float minCost2 = Infinity;
                 for (int i = minCostSplitBucket1; i < nSplits; ++i) {
                     // Compute cost for candidate split and update minimum if
                     // necessary
-                    if (costs2[i] < minCost2) {
-                        minCost2 = costs2[i];
+                    float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
+                    if (cost < minCost2) {
+                        minCost2 = cost;
                         minCostSplitBucket2 = i;
                     }
                 }
@@ -1016,16 +968,22 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 constexpr int nSplits = nBuckets - 1;
 
                 //[dim1Idx][dim2Idx]
-                float costsAbove[nSplits][nSplits] = {};
-                float costsBelow[nSplits][nSplits] = {};
+
+                float costs[nSplits][nSplits] = {};
+                //float costsBelow[nSplits][nSplits] = {};
                 BVHSplitBucket dim1Above[nSplits][nBuckets] = {};
                 BVHSplitBucket dim1Below[nSplits][nBuckets] = {};
+                BVHSplitBucket bucketsAboveL[nSplits][nSplits] = {};
+                BVHSplitBucket bucketsBelowL[nSplits][nSplits] = {};
+                BVHSplitBucket bucketsAboveR[nSplits][nSplits] = {};
+                BVHSplitBucket bucketsBelowR[nSplits][nSplits] = {};
                 // Compute costs for potential splits
                 // Compute dimensions independent
                 // For each column precompute rows O(2 * nBuckets * (nBuckets-1))
                 for (int col = 0; col < nBuckets; ++col) {
                     // precompute above
-                    dim1Above[0][col] = buckets[0][col];
+                    dim1Above[0][col].bounds = buckets[0][col].bounds;
+                    dim1Above[0][col].count = buckets[0][col].count;
                     for (int i = 1; i < nSplits; ++i) {
                         dim1Above[i][col].bounds =
                             Union(dim1Above[i - 1][col].bounds, buckets[i][col].bounds);
@@ -1033,7 +991,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             dim1Above[i - 1][col].count + buckets[i][col].count;
                     }
                     // precompute below
-                    dim1Below[nSplits - 1][col] = buckets[nSplits][col];
+                    dim1Below[nSplits - 1][col].bounds = buckets[nSplits][col].bounds;
+                    dim1Below[nSplits - 1][col].count = buckets[nSplits][col].count;
                     for (int i = nSplits - 1; i >= 1; --i) {
                         dim1Below[i - 1][col].bounds =
                             Union(dim1Below[i][col].bounds, buckets[i][col].bounds);
@@ -1045,50 +1004,48 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 // values
                 for (int row = 0; row < nSplits; row++) {
                     // Comute splits above (j<i)
-                    //  Partially initialize _costs_ using a scan from left over splits
-                    int countL = 0;
-                    Bounds3f boundL;
+                    bucketsAboveL[row][0].bounds = dim1Above[row][0].bounds;
+                    bucketsAboveL[row][0].count = dim1Above[row][0].count;
                     for (int col = 0; col < nSplits; ++col) {
-                        boundL = Union(boundL, dim1Above[row][col].bounds);
-                        countL += dim1Above[row][col].count;
-                        costsAbove[row][col] =
-                            countL == 0 ? 0.f : countL * boundL.SurfaceArea();
-                        CHECK(!IsNaN(costsAbove[row][col]));
+                        bucketsAboveL[row][col].bounds =
+                            Union(bucketsAboveL[row][col-1].bounds, dim1Above[row][col].bounds);
+                        bucketsAboveL[row][col].count =
+                            bucketsAboveL[row][col - 1].count + dim1Above[row][col].count;
                     }
-                    // Finish initializing _costs_ using a scan from right over splits
-                    int countR = 0;
-                    Bounds3f boundR;
+                    bucketsAboveR[row][nSplits - 1].bounds =
+                        dim1Above[row][nSplits - 1].bounds;
+                    bucketsAboveR[row][nSplits - 1].count =
+                        dim1Above[row][nSplits - 1].count;
                     for (int col = nSplits; col >= 1; --col) {
-                        boundR = Union(boundR, dim1Above[row][col].bounds);
-                        countR += dim1Above[row][col].count;
-                        costsAbove[row][col - 1] +=
-                            countR == 0 ? 0.f : countR * boundR.SurfaceArea();
-                        CHECK(!IsNaN(costsAbove[row][col - 1]));
+                        bucketsAboveR[row][col - 1].bounds =
+                            Union(bucketsAboveR[row][col].bounds,
+                                  dim1Above[row][col].bounds);
+                        bucketsAboveR[row][col - 1].count =
+                            bucketsAboveR[row][col].count + dim1Above[row][col].count;
                     }
                 }
                 // Compute costs for splits below(rows > splitRow) by summing precomputed
                 // values
                 for (int row = 0; row < nSplits; row++) {
-                    // Comute splits above (j<i)
-                    //  Partially initialize _costs_ using a scan from left over splits
-                    int countL = 0;
-                    Bounds3f boundL;
+                    // Comute splits below (j>i)
+                    bucketsBelowL[row][0].bounds = dim1Below[row][0].bounds;
+                    bucketsBelowL[row][0].count = dim1Below[row][0].count;
                     for (int col = 0; col < nSplits; ++col) {
-                        boundL = Union(boundL, dim1Below[row][col].bounds);
-                        countL += dim1Below[row][col].count;
-                        costsBelow[row][col] =
-                            countL == 0 ? 0.f : countL * boundL.SurfaceArea();
-                        CHECK(!IsNaN(costsBelow[row][col]));
+                        bucketsBelowL[row][col].bounds =
+                            Union(bucketsBelowL[row][col - 1].bounds,
+                                  dim1Below[row][col].bounds);
+                        bucketsBelowL[row][col].count =
+                            bucketsBelowL[row][col - 1].count + dim1Below[row][col].count;
                     }
-                    // Finish initializing _costs_ using a scan from right over splits
-                    int countR = 0;
-                    Bounds3f boundR;
+                    bucketsBelowR[row][nSplits - 1].bounds =
+                        dim1Below[row][nSplits - 1].bounds;
+                    bucketsBelowR[row][nSplits - 1].count =
+                        dim1Below[row][nSplits - 1].count;
                     for (int col = nSplits; col >= 1; --col) {
-                        boundR = Union(boundR, dim1Below[row][col].bounds);
-                        countR += dim1Below[row][col].count;
-                        costsBelow[row][col - 1] +=
-                            countR == 0 ? 0.f : countR * boundR.SurfaceArea();
-                        CHECK(!IsNaN(costsBelow[row][col - 1]));
+                        bucketsBelowR[row][col - 1].bounds = Union(
+                            bucketsBelowR[row][col].bounds, dim1Below[row][col].bounds);
+                        bucketsBelowR[row][col - 1].count =
+                            bucketsBelowR[row][col].count + dim1Below[row][col].count;
                     }
                 }
                 // Can free resources here
@@ -1101,8 +1058,10 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         for (int colBelow = 0; colBelow < nSplits; ++colBelow) {
                             // Compute cost for candidate split and update minimum if
                             // necessary
-                            int cost =
-                                costsAbove[row][colAbove] + costsBelow[row][colBelow];
+                            float cost = costFunction4(bucketsAboveL[row][colAbove],
+                                                    bucketsAboveR[row][colAbove],
+                                                    bucketsBelowL[row][colBelow],
+                                                    bucketsBelowR[row][colBelow]);
                             if (cost < minCost) {
                                 minCost = cost;
                                 minCostRow = row;
@@ -1189,31 +1148,37 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     }
                     // Compute costs for splitting after each bucket
                     constexpr int nSplits = nBuckets - 1;
-                    float costs[nSplits] = {};
-                    // Partially initialize _costs_ using a forward scan over splits
-                    int countBelow = 0;
-                    Bounds3f boundBelow;
-                    for (int i = 0; i < nSplits; ++i) {
-                        boundBelow = Union(boundBelow, buckets[i].bounds);
-                        countBelow += buckets[i].count;
-                        costs[i] += countBelow * boundBelow.SurfaceArea();
+                    BVHSplitBucket bucketsBelow[nSplits];
+                    BVHSplitBucket bucketsAbove[nSplits];
+                    float costs[nSplits];
+
+                    bucketsBelow[0].bounds = buckets[0].bounds;
+                    bucketsBelow[0].count = buckets[0].count;
+                    for (int i = 1; i < nSplits; ++i) {
+                        bucketsBelow[i].bounds =
+                            Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                        bucketsBelow[i].count =
+                            bucketsBelow[i - 1].count + buckets[i].count;
                     }
                     // Finish initializing _costs_ using a backwards scan over splits
-                    int countAbove = 0;
-                    Bounds3f boundAbove;
-                    for (int i = nSplits; i >= 1; --i) {
-                        boundAbove = Union(boundAbove, buckets[i].bounds);
-                        countAbove += buckets[i].count;
-                        costs[i - 1] += countAbove * boundAbove.SurfaceArea();
+                    
+                    bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
+                    bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
+                    for (int i = nSplits - 1; i >= 1; --i) {
+                        bucketsAbove[i - 1].bounds =
+                            Union(bucketsAbove[i].bounds, buckets[i].bounds);
+                        bucketsAbove[i - 1].count =
+                            bucketsAbove[i].count + buckets[i].count;
                     }
-                    // Find bucket to split at that minimizes SAH metric
+                    // Find bucket to split at that minimizes metric
                     int minCostSplitBucket = -1;
                     Float minCost = Infinity;
                     for (int i = 0; i < nSplits; ++i) {
                         // Compute cost for candidate split and update minimum if
                         // necessary
-                        if (costs[i] < minCost) {
-                            minCost = costs[i];
+                        float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
+                        if (cost < minCost) {
+                            minCost = cost;
                             minCostSplitBucket = i;
                         }
                     }
