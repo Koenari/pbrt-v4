@@ -656,35 +656,41 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         };
         auto costFunction4 = [this](BVHSplitBucket leftAbove, BVHSplitBucket rightAbove,
                                    BVHSplitBucket leftBelow, BVHSplitBucket rightBelow) {
+            float sahCost = leftAbove.count > 0
+                                ? leftAbove.count * leftAbove.bounds.SurfaceArea()
+                            : 0 + rightAbove.count > 0
+                                ? rightAbove.count * rightAbove.bounds.SurfaceArea()
+                            : 0 + leftBelow.count > 0
+                                ? leftBelow.count * leftBelow.bounds.SurfaceArea()
+                            : 0 + rightBelow.count > 0
+                                ? rightBelow.count * rightBelow.bounds.SurfaceArea()
+                                : 0;
             switch (splitMethod) {
             case SplitMethod::SAH:
-                return leftAbove.count * leftAbove.bounds.SurfaceArea() +
-                       rightAbove.count * rightAbove.bounds.SurfaceArea() +
-                       leftBelow.count * leftBelow.bounds.SurfaceArea() +
-                       rightBelow.count * rightBelow.bounds.SurfaceArea();
+                return sahCost;
             case SplitMethod::EPO: {
                 float alpha = 0.5f;
-                float sahCost = leftAbove.count * leftAbove.bounds.SurfaceArea() +
-                                rightAbove.count * rightAbove.bounds.SurfaceArea() +
-                                leftBelow.count * leftBelow.bounds.SurfaceArea() +
-                                rightBelow.count * rightBelow.bounds.SurfaceArea();
-                float epoCost =
-                    pbrt::Intersect(leftAbove.bounds,
-                                    Union(rightAbove.bounds,
-                                          Union(leftBelow.bounds, rightBelow.bounds)))
-                        .SurfaceArea() +
-                    pbrt::Intersect(rightAbove.bounds,
-                                    Union(leftAbove.bounds,
-                                          Union(leftBelow.bounds, rightBelow.bounds)))
-                        .SurfaceArea() +
-                    pbrt::Intersect(leftBelow.bounds,
-                                    Union(rightBelow.bounds,
-                                          Union(leftAbove.bounds, rightAbove.bounds)))
-                        .SurfaceArea() +
-                    pbrt::Intersect(rightBelow.bounds,
-                                    Union(leftBelow.bounds,
-                                          Union(leftAbove.bounds, rightAbove.bounds)))
-                        .SurfaceArea();
+                float epoCost = 0.f;
+                auto la = pbrt::Intersect(
+                    leftAbove.bounds,
+                    Union(rightAbove.bounds, Union(leftBelow.bounds, rightBelow.bounds)));
+                auto ra = pbrt::Intersect(
+                    rightAbove.bounds,
+                    Union(leftAbove.bounds, Union(leftBelow.bounds, rightBelow.bounds)));
+                auto lb = pbrt::Intersect(
+                    leftBelow.bounds,
+                    Union(rightBelow.bounds, Union(leftAbove.bounds, rightAbove.bounds)));
+                auto rb = pbrt::Intersect(
+                    rightBelow.bounds,
+                    Union(leftBelow.bounds, Union(leftAbove.bounds, rightAbove.bounds)));
+                if (!la.IsEmpty())
+                    epoCost += la.SurfaceArea();
+                if (!ra.IsEmpty())
+                    epoCost += ra.SurfaceArea();
+                if (!lb.IsEmpty())
+                    epoCost += lb.SurfaceArea();
+                if (!rb.IsEmpty())
+                    epoCost += rb.SurfaceArea();
                 return alpha * epoCost + (1 - alpha) * sahCost;
             }
             default:
@@ -829,7 +835,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 //  Partially initialize _costs_ using a forward scan over splits
                 bucketsBelow[0].bounds = buckets[0].bounds;
                 bucketsBelow[0].count = buckets[0].count;
-                for (int i = 0; i < minCostSplitBucket1; ++i) {
+                for (int i = 1; i < minCostSplitBucket1; ++i) {
                     bucketsBelow[i].bounds =
                         Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
                     bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
@@ -946,7 +952,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 // Splitting on a 2 dimensional array
                 // Have a bucket array on 2 dimenions
                 //    Allocate _BVHSplitBucket_ for SAH partition buckets
-                constexpr int nBuckets = 12;
+                constexpr size_t nBuckets = 12;
                 BVHSplitBucket buckets[nBuckets][nBuckets];
                 int dim = axis[1];
                 int dim2 = axis[0] = axis[2] = ((centroidBounds.MaxDimensions() >> 2) & 3);
@@ -965,18 +971,24 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     buckets[b1][b2].count++;
                     buckets[b1][b2].bounds = Union(buckets[b1][b2].bounds, prim.bounds);
                 }
-                constexpr int nSplits = nBuckets - 1;
+                constexpr size_t nSplits = nBuckets - 1;
 
                 //[dim1Idx][dim2Idx]
 
                 float costs[nSplits][nSplits] = {};
-                //float costsBelow[nSplits][nSplits] = {};
-                BVHSplitBucket dim1Above[nSplits][nBuckets] = {};
-                BVHSplitBucket dim1Below[nSplits][nBuckets] = {};
-                BVHSplitBucket bucketsAboveL[nSplits][nSplits] = {};
-                BVHSplitBucket bucketsBelowL[nSplits][nSplits] = {};
-                BVHSplitBucket bucketsAboveR[nSplits][nSplits] = {};
-                BVHSplitBucket bucketsBelowR[nSplits][nSplits] = {};
+                std::vector<std::vector<BVHSplitBucket>> dim1Above = 
+                    std::vector(nSplits,std::vector<BVHSplitBucket>(nBuckets));
+                //BVHSplitBucket dim1Above[nSplits][nBuckets] = {};
+                std::vector<std::vector<BVHSplitBucket>> dim1Below =
+                    std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets));
+                std::vector<std::vector<BVHSplitBucket>> bucketsAboveL =
+                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                std::vector<std::vector<BVHSplitBucket>> bucketsBelowL =
+                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                std::vector<std::vector<BVHSplitBucket>> bucketsAboveR =
+                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                std::vector<std::vector<BVHSplitBucket>> bucketsBelowR =
+                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
                 // Compute costs for potential splits
                 // Compute dimensions independent
                 // For each column precompute rows O(2 * nBuckets * (nBuckets-1))
@@ -984,7 +996,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     // precompute above
                     dim1Above[0][col].bounds = buckets[0][col].bounds;
                     dim1Above[0][col].count = buckets[0][col].count;
-                    for (int i = 1; i < nSplits; ++i) {
+                    for (size_t i = 1; i < nSplits; ++i) {
                         dim1Above[i][col].bounds =
                             Union(dim1Above[i - 1][col].bounds, buckets[i][col].bounds);
                         dim1Above[i][col].count =
@@ -993,7 +1005,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     // precompute below
                     dim1Below[nSplits - 1][col].bounds = buckets[nSplits][col].bounds;
                     dim1Below[nSplits - 1][col].count = buckets[nSplits][col].count;
-                    for (int i = nSplits - 1; i >= 1; --i) {
+                    for (size_t i = nSplits - 1; i >= 1; --i) {
                         dim1Below[i - 1][col].bounds =
                             Union(dim1Below[i][col].bounds, buckets[i][col].bounds);
                         dim1Below[i - 1][col].count =
@@ -1002,11 +1014,11 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 }
                 // Compute costs for splits above(rows < splitRow) by summing precomputed
                 // values
-                for (int row = 0; row < nSplits; row++) {
+                for (size_t row = 0; row < nSplits; row++) {
                     // Comute splits above (j<i)
                     bucketsAboveL[row][0].bounds = dim1Above[row][0].bounds;
                     bucketsAboveL[row][0].count = dim1Above[row][0].count;
-                    for (int col = 0; col < nSplits; ++col) {
+                    for (size_t col = 1; col < nSplits; ++col) {
                         bucketsAboveL[row][col].bounds =
                             Union(bucketsAboveL[row][col-1].bounds, dim1Above[row][col].bounds);
                         bucketsAboveL[row][col].count =
@@ -1016,7 +1028,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         dim1Above[row][nSplits - 1].bounds;
                     bucketsAboveR[row][nSplits - 1].count =
                         dim1Above[row][nSplits - 1].count;
-                    for (int col = nSplits; col >= 1; --col) {
+                    for (size_t col = nSplits - 1; col >= 1; --col) {
                         bucketsAboveR[row][col - 1].bounds =
                             Union(bucketsAboveR[row][col].bounds,
                                   dim1Above[row][col].bounds);
@@ -1026,11 +1038,11 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 }
                 // Compute costs for splits below(rows > splitRow) by summing precomputed
                 // values
-                for (int row = 0; row < nSplits; row++) {
+                for (size_t row = 0; row < nSplits; row++) {
                     // Comute splits below (j>i)
                     bucketsBelowL[row][0].bounds = dim1Below[row][0].bounds;
                     bucketsBelowL[row][0].count = dim1Below[row][0].count;
-                    for (int col = 0; col < nSplits; ++col) {
+                    for (size_t col = 1; col < nSplits; ++col) {
                         bucketsBelowL[row][col].bounds =
                             Union(bucketsBelowL[row][col - 1].bounds,
                                   dim1Below[row][col].bounds);
@@ -1041,27 +1053,28 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         dim1Below[row][nSplits - 1].bounds;
                     bucketsBelowR[row][nSplits - 1].count =
                         dim1Below[row][nSplits - 1].count;
-                    for (int col = nSplits; col >= 1; --col) {
+                    for (size_t col = nSplits - 1; col >= 1; --col) {
                         bucketsBelowR[row][col - 1].bounds = Union(
                             bucketsBelowR[row][col].bounds, dim1Below[row][col].bounds);
                         bucketsBelowR[row][col - 1].count =
                             bucketsBelowR[row][col].count + dim1Below[row][col].count;
                     }
                 }
-                // Can free resources here
+                
                 int minCostRow = -1;
                 int minCostColAbove = -1;
                 int minCostColBelow = -1;
                 Float minCost = Infinity;
-                for (int row = 0; row < nSplits; ++row) {
-                    for (int colAbove = 0; colAbove < nSplits; ++colAbove) {
-                        for (int colBelow = 0; colBelow < nSplits; ++colBelow) {
+                for (size_t row = 0; row < nSplits; ++row) {
+                    for (size_t colAbove = 0; colAbove < nSplits; ++colAbove) {
+                        for (size_t colBelow = 0; colBelow < nSplits; ++colBelow) {
                             // Compute cost for candidate split and update minimum if
                             // necessary
                             float cost = costFunction4(bucketsAboveL[row][colAbove],
                                                     bucketsAboveR[row][colAbove],
                                                     bucketsBelowL[row][colBelow],
                                                     bucketsBelowR[row][colBelow]);
+                            DCHECK_GT(cost,0);
                             if (cost < minCost) {
                                 minCost = cost;
                                 minCostRow = row;
@@ -1071,9 +1084,10 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         }
                     }
                 }
+                // Can free resources here
                 // Compute leaf cost and SAH split cost for chosen split
                 Float leafCost = bvhPrimitives.size();
-                minCost = 3.f / 4.f + minCost / bounds.SurfaceArea();
+                minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
                 if (leafCost <= minCost && bvhPrimitives.size() <= maxPrimsInNode) {
                     int firstPrimOffset =
                         orderedPrimsOffset->fetch_add(bvhPrimitives.size());
@@ -1150,7 +1164,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     constexpr int nSplits = nBuckets - 1;
                     BVHSplitBucket bucketsBelow[nSplits];
                     BVHSplitBucket bucketsAbove[nSplits];
-                    float costs[nSplits];
 
                     bucketsBelow[0].bounds = buckets[0].bounds;
                     bucketsBelow[0].count = buckets[0].count;
@@ -1222,8 +1235,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             break;
         }
         }
-        CHECK_LE(splits[0], splits[1]);
-        CHECK_LE(splits[1], splits[2]);
         size_t splitpoints[5] = {0, splits[0], splits[1], splits[2],
                                 bvhPrimitives.size()};
         WideBVHBuildNode *children[TreeWidth];
@@ -1231,6 +1242,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         if (bvhPrimitives.size() > 128 * 1024) {
             // Recursively build child BVHs in parallel
             ParallelFor(0, TreeWidth, [&](int i) {
+                    DCHECK_LE(splitpoints[i], splitpoints[i + 1]);
                     children[i] = buildRecursive(
                         threadAllocators,
                         bvhPrimitives.subspan(splitpoints[i],
@@ -1241,6 +1253,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         } else {
             // Recursively build child BVHs sequentially
             for (int i = 0; i < TreeWidth; i++) {
+                DCHECK_LE(splitpoints[i], splitpoints[i + 1]);  
                     children[i] = buildRecursive(
                         threadAllocators,
                         bvhPrimitives.subspan(splitpoints[i],
@@ -1261,7 +1274,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
     // Follow ray through BVH nodes to find primitive intersections
     int toVisitOffset = 0, currentNodeIndex = 0;
-    int nodesToVisit[128];
+    int nodesToVisit[1024];
     int nodesVisited = 0;
     while (true) {
         ++nodesVisited;
@@ -1456,6 +1469,7 @@ BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocat
                 // to EqualCounts.
                 if (midIter != bvhPrimitives.begin() && midIter != bvhPrimitives.end())
                     break;
+                __fallthrough;
             }
             case SplitMethod::EqualCounts: {
                 // Partition primitives into equally sized subsets

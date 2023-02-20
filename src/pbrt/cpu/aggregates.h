@@ -64,7 +64,7 @@ class WideBVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     int splitVariant;
-    static constexpr uint32_t TreeWidth = 4;
+    static constexpr size_t TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
     int traversalOrder[2][2][2][4] = {
         {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},
