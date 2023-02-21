@@ -685,12 +685,16 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     Union(leftBelow.bounds, Union(leftAbove.bounds, rightAbove.bounds)));
                 if (!la.IsEmpty())
                     epoCost += la.SurfaceArea();
+                DCHECK_GE(epoCost, 0);
                 if (!ra.IsEmpty())
                     epoCost += ra.SurfaceArea();
+                DCHECK_GE(epoCost, 0);
                 if (!lb.IsEmpty())
                     epoCost += lb.SurfaceArea();
+                DCHECK_GE(epoCost, 0);
                 if (!rb.IsEmpty())
                     epoCost += rb.SurfaceArea();
+                DCHECK_GE(epoCost, 0);
                 return alpha * epoCost + (1 - alpha) * sahCost;
             }
             default:
@@ -1012,6 +1016,16 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             dim1Below[i][col].count + buckets[i][col].count;
                     }
                 }
+                int aboveCounts[nSplits] = {0};
+                int belowCounts[nSplits] = {0};
+                for (int row = 0; row < nSplits; row++) {
+                    int count = 0;
+                    for (int col = 0; col < nBuckets; col++) {
+                        aboveCounts[row] += dim1Above[row][col].count;
+                        belowCounts[row] += dim1Below[row][col].count;
+                    }
+                    CHECK_EQ(aboveCounts[row] + belowCounts[row], bvhPrimitives.size());
+                }
                 // Compute costs for splits above(rows < splitRow) by summing precomputed
                 // values
                 for (size_t row = 0; row < nSplits; row++) {
@@ -1025,9 +1039,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             bucketsAboveL[row][col - 1].count + dim1Above[row][col].count;
                     }
                     bucketsAboveR[row][nSplits - 1].bounds =
-                        dim1Above[row][nSplits - 1].bounds;
+                        dim1Above[row][nSplits].bounds;
                     bucketsAboveR[row][nSplits - 1].count =
-                        dim1Above[row][nSplits - 1].count;
+                        dim1Above[row][nSplits].count;
                     for (size_t col = nSplits - 1; col >= 1; --col) {
                         bucketsAboveR[row][col - 1].bounds =
                             Union(bucketsAboveR[row][col].bounds,
@@ -1036,6 +1050,18 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             bucketsAboveR[row][col].count + dim1Above[row][col].count;
                     }
                 }
+#ifdef _DEBUG
+
+                for (int row = 0; row < nSplits; row++) {
+                    int count = 0;
+                    for (int col = 0; col < nSplits; col++) {
+                        CHECK_GE(aboveCounts[row], bucketsAboveL[row][col].count);
+                        CHECK_GE(aboveCounts[row], bucketsAboveR[row][col].count);
+                        CHECK_EQ(aboveCounts[row], bucketsAboveL[row][col].count +
+                                                       bucketsAboveR[row][col].count);
+                    }
+                }
+#endif
                 // Compute costs for splits below(rows > splitRow) by summing precomputed
                 // values
                 for (size_t row = 0; row < nSplits; row++) {
@@ -1050,9 +1076,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             bucketsBelowL[row][col - 1].count + dim1Below[row][col].count;
                     }
                     bucketsBelowR[row][nSplits - 1].bounds =
-                        dim1Below[row][nSplits - 1].bounds;
+                        dim1Below[row][nSplits].bounds;
                     bucketsBelowR[row][nSplits - 1].count =
-                        dim1Below[row][nSplits - 1].count;
+                        dim1Below[row][nSplits].count;
                     for (size_t col = nSplits - 1; col >= 1; --col) {
                         bucketsBelowR[row][col - 1].bounds = Union(
                             bucketsBelowR[row][col].bounds, dim1Below[row][col].bounds);
@@ -1060,7 +1086,17 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             bucketsBelowR[row][col].count + dim1Below[row][col].count;
                     }
                 }
-                
+#ifdef _DEBUG
+                for (int row = 0; row < nSplits; row++) {
+                    int count = 0;
+                    for (int col = 0; col < nSplits; col++) {
+                        CHECK_GE(belowCounts[row], bucketsBelowL[row][col].count);
+                        CHECK_GE(belowCounts[row], bucketsBelowR[row][col].count);
+                        CHECK_EQ(belowCounts[row], bucketsBelowL[row][col].count +
+                                                       bucketsBelowR[row][col].count);
+                    }
+                }
+#endif  // _DEBUG
                 int minCostRow = -1;
                 int minCostColAbove = -1;
                 int minCostColBelow = -1;
