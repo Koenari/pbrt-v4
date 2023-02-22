@@ -41,8 +41,7 @@ class WideBVHAggregate {
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
-        OptimizationStrategy = OptimizationStrategy::All,
-        float eopRatio = 0.5f);
+        OptimizationStrategy = OptimizationStrategy::All, float eopRatio = 0.5f);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;

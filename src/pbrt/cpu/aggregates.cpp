@@ -648,8 +648,11 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             };
         };
         auto costFunction2 = [this](BVHSplitBucket left, BVHSplitBucket right){
-            float sahCost = left.count > 0 ? left.count * left.bounds.SurfaceArea() : 0.f +
-                            right.count > 0 ? right.count * right.bounds.SurfaceArea() : 0.f;
+            float sahCost = 0.f;
+            if (left.count)
+                sahCost += left.count * left.bounds.SurfaceArea();
+            if (right.count)
+                sahCost += right.count * right.bounds.SurfaceArea();
             switch (splitMethod) { 
                 case SplitMethod::SAH:
                 return sahCost;
@@ -666,20 +669,20 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         };
         auto costFunction4 = [this](BVHSplitBucket leftAbove, BVHSplitBucket rightAbove,
                                    BVHSplitBucket leftBelow, BVHSplitBucket rightBelow) {
-            float sahCost = leftAbove.count > 0
-                                ? leftAbove.count * leftAbove.bounds.SurfaceArea()
-                            : 0 + rightAbove.count > 0
-                                ? rightAbove.count * rightAbove.bounds.SurfaceArea()
-                            : 0 + leftBelow.count > 0
-                                ? leftBelow.count * leftBelow.bounds.SurfaceArea()
-                            : 0 + rightBelow.count > 0
-                                ? rightBelow.count * rightBelow.bounds.SurfaceArea()
-                                : 0;
+            float sahCost = 0.f;
+            float epoCost = 0.f;
+            if (leftAbove.count)
+                sahCost += leftAbove.count * leftAbove.bounds.SurfaceArea();
+            if (rightAbove.count)
+                sahCost += rightAbove.count * rightAbove.bounds.SurfaceArea();
+            if (leftBelow.count)
+                sahCost += leftBelow.count * leftBelow.bounds.SurfaceArea();
+            if (rightBelow.count)
+                sahCost += rightBelow.count * rightBelow.bounds.SurfaceArea();
             switch (splitMethod) {
             case SplitMethod::SAH:
                 return sahCost;
             case SplitMethod::EPO: {
-                float epoCost = 0.f;
                 auto la = pbrt::Intersect(
                     leftAbove.bounds,
                     Union(rightAbove.bounds, Union(leftBelow.bounds, rightBelow.bounds)));
@@ -694,18 +697,14 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     Union(leftBelow.bounds, Union(leftAbove.bounds, rightAbove.bounds)));
                 if (!la.IsEmpty())
                     epoCost += la.SurfaceArea();
-                DCHECK_GE(epoCost, 0);
                 if (!ra.IsEmpty())
                     epoCost += ra.SurfaceArea();
-                DCHECK_GE(epoCost, 0);
                 if (!lb.IsEmpty())
                     epoCost += lb.SurfaceArea();
-                DCHECK_GE(epoCost, 0);
                 if (!rb.IsEmpty())
                     epoCost += rb.SurfaceArea();
-                DCHECK_GE(epoCost, 0);
-                return epoRatio * epoCost + (1 - epoRatio) * sahCost;
             }
+                return epoRatio * epoCost + (1 - epoRatio) * sahCost;
             default:
                 return 0.f;
             };
