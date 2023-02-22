@@ -41,7 +41,8 @@ class WideBVHAggregate {
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
-        OptimizationStrategy = OptimizationStrategy::All);
+        OptimizationStrategy = OptimizationStrategy::All,
+        float eopRatio = 0.5f);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;
@@ -64,6 +65,7 @@ class WideBVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     int splitVariant;
+    float epoRatio;
     static constexpr size_t TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
     int traversalOrder[2][2][2][4] = {

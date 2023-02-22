@@ -262,10 +262,10 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
 
 WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
                                    SplitMethod splitMethod, int splitVariant,
-                                   CreationMethod method, OptimizationStrategy opti)
+                                   CreationMethod method, OptimizationStrategy opti, float epoRatio)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
-      splitMethod(splitMethod), splitVariant(splitVariant) {
+      splitMethod(splitMethod), splitVariant(splitVariant), epoRatio(epoRatio)  {
     CHECK(!primitives.empty());
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
@@ -372,9 +372,10 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
             Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
         }
     };
+    float epoRatio = parameters.GetOneFloat("epoRatio",0.5f);
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
-    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
+    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat, epoRatio);
 }
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
@@ -638,17 +639,26 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
             return node;
         }
+        auto leafCost = [this](int count) {
+            switch (splitMethod) { 
+            case SplitMethod::EPO:
+                return count * (1 - epoRatio);
+            default:
+                return (float)count;
+            };
+        };
         auto costFunction2 = [this](BVHSplitBucket left, BVHSplitBucket right){
+            float sahCost = left.count > 0 ? left.count * left.bounds.SurfaceArea() : 0.f +
+                            right.count > 0 ? right.count * right.bounds.SurfaceArea() : 0.f;
             switch (splitMethod) { 
                 case SplitMethod::SAH:
-                return left.count * left.bounds.SurfaceArea() +
-                       right.count * right.bounds.SurfaceArea();
+                return sahCost;
                 case SplitMethod::EPO: {
-                float alpha = 0.5f;
-                float sahCost = left.count * left.bounds.SurfaceArea() +
-                                right.count * right.bounds.SurfaceArea();
-                float epoCost = pbrt::Intersect(left.bounds, right.bounds).SurfaceArea();
-                return alpha * epoCost + (1 - alpha) * sahCost;
+                auto overlap = pbrt::Intersect(left.bounds, right.bounds);
+                float epoCost = 0.f;
+                if (!overlap.IsEmpty())
+                    epoCost += overlap.SurfaceArea();
+                return epoRatio * epoCost + (1 - epoRatio) * sahCost;
                 }
                 default:
                 return 0.f;
@@ -669,7 +679,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             case SplitMethod::SAH:
                 return sahCost;
             case SplitMethod::EPO: {
-                float alpha = 0.5f;
                 float epoCost = 0.f;
                 auto la = pbrt::Intersect(
                     leftAbove.bounds,
@@ -695,7 +704,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 if (!rb.IsEmpty())
                     epoCost += rb.SurfaceArea();
                 DCHECK_GE(epoCost, 0);
-                return alpha * epoCost + (1 - alpha) * sahCost;
+                return epoRatio * epoCost + (1 - epoRatio) * sahCost;
             }
             default:
                 return 0.f;
@@ -1122,9 +1131,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 }
                 // Can free resources here
                 // Compute leaf cost and SAH split cost for chosen split
-                Float leafCost = bvhPrimitives.size();
-                minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
-                if (leafCost <= minCost && bvhPrimitives.size() <= maxPrimsInNode) {
+                minCost = 1.f  + minCost / bounds.SurfaceArea();
+                if (leafCost(bvhPrimitives.size()) <= minCost && bvhPrimitives.size() <= maxPrimsInNode) {
                     int firstPrimOffset =
                         orderedPrimsOffset->fetch_add(bvhPrimitives.size());
                     for (size_t i = 0; i < bvhPrimitives.size(); ++i) {
@@ -1233,10 +1241,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     }
                     // Consider leaf only for first iteration
                     if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
-                        // Compute leaf cost and SAH split cost for chosen split
-                        Float leafCost = count;
+                        // Compute leaf cost and SAH split cost for chosen 
                         minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
-                        if (leafCost <= minCost) {
+                        if (leafCost(count) <= minCost) {
                             int firstPrimOffset =
                                 orderedPrimsOffset->fetch_add(count);
                             for (size_t i = 0; i < count; ++i) {
