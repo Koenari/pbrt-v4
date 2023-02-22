@@ -806,8 +806,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 constexpr int nSplits = nBuckets - 1;
                 BVHSplitBucket bucketsAbove[nSplits];
                 BVHSplitBucket bucketsBelow[nSplits];
-                float costs[nSplits] = {};
-                //float costs2[nSplits] = {};
                 // Partially initialize _costs_ using a forward scan over splits
                 bucketsBelow[0].bounds = buckets[0].bounds;
                 bucketsBelow[0].count = buckets[0].count;
@@ -826,98 +824,97 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     bucketsAbove[i - 1].count =
                         bucketsAbove[i].count + buckets[i].count;
                 }
+#ifdef _DEBUG
                 for (int i = 0; i < nSplits; ++i) {
-                    costs[i] = costFunction2(bucketsBelow[i], bucketsAbove[i]);
+                    DCHECK_EQ(bucketsAbove[i].count + bucketsBelow[i].count, bvhPrimitives.size());
                 }
-
+#endif  //  _DEBUG
                 // Find bucket to split at that minimizes SAH metric
                 int minCostSplitBucket1 = -1;
-                Float minCost1 = Infinity;
+                Float minCost = Infinity;
                 for (int i = 0; i < nSplits; ++i) {
                     // Compute cost for candidate split and update minimum if
                     // necessary
-                    if (costs[i] < minCost1) {
-                        minCost1 = costs[i];
+                    float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
+                    if (cost < minCost) {
+                        minCost = cost;
                         minCostSplitBucket1 = i;
                     }
                 }
                 CHECK_GE(minCostSplitBucket1, 0);
                 CHECK_LT(minCostSplitBucket1, nSplits);
-                //Find bucket below other
-                //  Partially initialize _costs_ using a forward scan over splits
+                //Initialize below buckets for both sides of split1
+                bucketsBelow[minCostSplitBucket1] = {};
+                for (int i = minCostSplitBucket1 + 1; i < nSplits; ++i) {
+                    bucketsBelow[i].bounds =
+                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
+                }
                 bucketsBelow[0].bounds = buckets[0].bounds;
                 bucketsBelow[0].count = buckets[0].count;
-                for (int i = 1; i < minCostSplitBucket1; ++i) {
+                for (int i = 1; i <= minCostSplitBucket1; ++i) {
                     bucketsBelow[i].bounds =
                         Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
                     bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
                 }
 
-                // Finish initializing _costs_ using a backwards scan over splits
+                // Initialize above buckets for both sides of split1
                 bucketsAbove[minCostSplitBucket1-1].bounds =
-                    buckets[minCostSplitBucket1-1].bounds;
+                    buckets[minCostSplitBucket1].bounds;
                 bucketsAbove[minCostSplitBucket1-1].count =
-                    buckets[minCostSplitBucket1-1].count;
+                    buckets[minCostSplitBucket1].count;
                 for (int i = minCostSplitBucket1-1; i >= 1; --i) {
                     bucketsAbove[i - 1].bounds =
-                        Union(bucketsAbove[i].bounds, buckets[i - 1].bounds);
+                        Union(bucketsAbove[i].bounds, buckets[i].bounds);
                     bucketsAbove[i - 1].count =
-                        bucketsAbove[i].count + buckets[i - 1].count;
-                }
-                int minCostSplitBucket0 = -1;
-                Float minCost0 = Infinity;
-                for (int i = 0; i < minCostSplitBucket1; ++i) {
-                    // Compute cost for candidate split and update minimum if
-                    // necessary
-                    float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
-                    if (cost < minCost0) {
-                        minCost0 = cost;
-                        minCostSplitBucket0 = i;
-                    }
-                }
-                if (minCostSplitBucket0 < 0)
-                    minCostSplitBucket0 = 0;
-                // Find bucket above first
-                //   Partially initialize _costs_ using a forward scan over splits
-                bucketsBelow[minCostSplitBucket1].bounds =
-                    buckets[minCostSplitBucket1].bounds;
-                bucketsBelow[minCostSplitBucket1].count =
-                    buckets[minCostSplitBucket1].count;
-                for (int i = minCostSplitBucket1; i < nSplits; ++i) {
-                    bucketsBelow[i].bounds =
-                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
-                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
+                        bucketsAbove[i].count + buckets[i].count;
                 }
 
                 // Finish initializing _costs_ using a backwards scan over splits
                 bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
                 bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
-                for (int i = nSplits; i > minCostSplitBucket1; --i) {
+                for (int i = nSplits-1; i > minCostSplitBucket1; --i) {
                     bucketsAbove[i - 1].bounds =
-                        Union(bucketsAbove[i].bounds, buckets[i - 1].bounds);
+                        Union(bucketsAbove[i].bounds, buckets[i].bounds);
                     bucketsAbove[i - 1].count =
-                        bucketsAbove[i].count + buckets[i - 1].count;
+                        bucketsAbove[i].count + buckets[i].count;
                 }
+                BVHSplitBucket emptyBucket = {};
+                minCost = Infinity;
+                int minCostSplitBucket0 = -1;
                 int minCostSplitBucket2 = -1;
-                Float minCost2 = Infinity;
-                for (int i = minCostSplitBucket1; i < nSplits; ++i) {
-                    // Compute cost for candidate split and update minimum if
-                    // necessary
-                    float cost = costFunction2(bucketsBelow[i], bucketsAbove[i]);
-                    if (cost < minCost2) {
-                        minCost2 = cost;
-                        minCostSplitBucket2 = i;
+                for (int split0 = 0; split0 <= minCostSplitBucket1;
+                     ++split0) {
+                    for (int split2 = minCostSplitBucket1; split2 < nSplits;
+                         split2++) {
+                        BVHSplitBucket bucket0Bel = bucketsBelow[split0];
+                        BVHSplitBucket bucket0Abv = split0 == minCostSplitBucket1 ? emptyBucket: bucketsAbove[split0];
+                        BVHSplitBucket bucket2Bel = split2 == minCostSplitBucket1 ? emptyBucket : bucketsBelow[split2];
+                        BVHSplitBucket bucket2Abv = bucketsAbove[split2];
+#ifdef _DEBUG
+                        DCHECK_EQ(bucket0Bel.count + bucket0Abv.count +
+                                      bucket2Bel.count + bucket2Abv.count,
+                                  bvhPrimitives.size());
+#endif  //  _DEBUG
+                        float cost =
+                            costFunction4(bucket0Bel, bucket0Abv, bucket2Bel, bucket2Abv);
+                        if (cost < minCost) {
+                            minCost = cost;
+                            minCostSplitBucket0 = split0;
+                            minCostSplitBucket2 = split2;
+                        }
                     }
                 }
+                if (minCostSplitBucket0 < 0)
+                    minCostSplitBucket0 = 0;
                 if (minCostSplitBucket2 < 0)
                     minCostSplitBucket2 = minCostSplitBucket1;
 
                 // Compute leaf cost and SAH split cost for chosen split
-                Float leafCost = bvhPrimitives.size();
-                minCost1 = 3.f / 4.f + (minCost0 + minCost2) / bounds.SurfaceArea();
+                minCost = 1.f + minCost / bounds.SurfaceArea();
 
                 // Either create leaf or split primitives at selected SAH bucket
-                if (bvhPrimitives.size() > maxPrimsInNode || minCost1 < leafCost) {
+                if (bvhPrimitives.size() > maxPrimsInNode || minCost < leafCost(bvhPrimitives.size())) {
                     auto midIter = std::partition(
                         bvhPrimitives.begin(), bvhPrimitives.end(),
                         [=](const BVHPrimitive &bp) {
