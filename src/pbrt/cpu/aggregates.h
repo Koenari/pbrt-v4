@@ -59,8 +59,8 @@ class WideBVHAggregate {
     int flattenBVH(WideBVHBuildNode *node, int *offset);
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
     WideBVHBuildNode *buildFromBVH(BVHBuildNode *root);
-    Float splitCost(const int count, BVHSplitBucket **buckets) const;
-    Float inline leafCost(const int primCount) const;
+    Float splitCost(int count, BVHSplitBucket **buckets) const;
+    Float inline leafCost(int primCount) const;
     // WideBVHAggregate Private Members
     int maxPrimsInNode;
     std::vector<Primitive> primitives;

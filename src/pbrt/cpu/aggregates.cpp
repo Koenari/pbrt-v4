@@ -371,7 +371,9 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
             Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
         }
     };
-    float epoRatio = parameters.GetOneFloat("epoRatio",0.5f);
+    Float epoRatio = parameters.GetOneFloat("epoRatio",0.5f);
+    if (splitMethod != SplitMethod::EPO)
+        epoRatio = 0.f;
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat, epoRatio);
@@ -573,10 +575,12 @@ WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot){
     node->InitInterior(axis, children);
     return node;
 };
-Float WideBVHAggregate::leafCost(const int primCount) const{
-    return (1-epoRatio) * primCount;
+Float WideBVHAggregate::leafCost(int primCount) const{
+    if (splitMethod == SplitMethod::EPO)
+        return (1-epoRatio) * primCount;
+    return primCount;
 };
-Float WideBVHAggregate::splitCost(const int count, BVHSplitBucket **buckets) const{
+Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
         return 0.f;
     Float sahCost = 0.f;
@@ -590,7 +594,7 @@ Float WideBVHAggregate::splitCost(const int count, BVHSplitBucket **buckets) con
             for (int j = 0; j < count; ++j) {
                 if (j == i)
                     continue;
-                overlap = Union(overlap, buckets[i]->bounds);
+                overlap = Union(overlap, buckets[j]->bounds);
             }
             overlap = pbrt::Intersect(overlap, bucket.bounds);
             if (!overlap.IsEmpty())
@@ -1968,6 +1972,8 @@ BVHAggregate *BVHAggregate::Create(std::vector<Primitive> prims,
         splitMethod = SplitMethod::SAH;
     }
     Float epoRatio = parameters.GetOneFloat("epoRatio", 0.5f);
+    if (splitMethod != SplitMethod::EPO)
+        epoRatio = 0.f;
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
     return new BVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, epoRatio);
