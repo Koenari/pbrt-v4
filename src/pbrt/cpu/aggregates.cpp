@@ -23,9 +23,11 @@ namespace pbrt {
 STAT_MEMORY_COUNTER("Memory/BVH", treeBytes);
 STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
-STAT_COUNTER("BVH/Empty nodes", emptyNodes);
+STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
+STAT_PIXEL_COUNTER("BVH/SIMD Triangle intersections", bvhSimdTriangleTests);
+STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
 
 // MortonPrimitive Definition
 struct MortonPrimitive {
@@ -125,6 +127,7 @@ struct WideBVHBuildNode {
         splitAxis[1] = a[1];
         splitAxis[2] = a[2];
         nPrimitives = 0;
+        totalNodes += 4;
         ++interiorNodes;
     }
     Bounds3f bounds;
@@ -183,13 +186,12 @@ struct alignas(32) WideLinearBVHNode {
     // x:0 y:1 z:2
     //mains split axis in bits 0+1
     //secondary exits in bit 2+3
-    // 7 | 6       | 5 4     | 3 2     | 1 0
-    //   | IsEmpty | axis[2] | axis[1] | axis [0]
+    // 7 6 | 5 4     | 3 2     | 1 0
+    //     | axis[2] | axis[1] | axis [0]
     uint8_t axis;
     inline uint8_t Axis0() const { return axis >> 0 & 3; }
     inline uint8_t Axis1() const { return axis >> 2 & 3; }
     inline uint8_t Axis2() const { return axis >> 4 & 3; }
-    inline bool  IsEmpty() const { return axis >> 6 & 1; }
     inline uint8_t ConstructAxis(int axis0,int axis1, int axis2) const 
     { 
         return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4);
@@ -313,14 +315,10 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    LOG_VERBOSE("WideBVH contains %d empty nodes (%.1f %%)", emptyNodes,
-        float(emptyNodes) / float(emptyNodes + totalNodes.load()) * 100.f);
     optimizeTree(root, &totalNodes, opti);
     LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    LOG_VERBOSE("Optimized WideBVH contains %d empty nodes (%.1f %%)", emptyNodes,
-                float(emptyNodes) / float(emptyNodes + totalNodes.load()) * 100.f);
     treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     nodes = new WideLinearBVHNode[totalNodes];
@@ -600,7 +598,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                                     std::atomic<int> *orderedPrimsOffset,
     std::vector<Primitive> &orderedPrims) {
     if (bvhPrimitives.size() < 1) {
-        emptyNodes++;
         return nullptr;
     }
     ++*totalNodes;
@@ -1315,12 +1312,15 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     int toVisitOffset = 0, currentNodeIndex = 0;
     int nodesToVisit[1024];
     int nodesVisited = 0;
+    int simdNodesVisited = 1;
+    int simdTriangleTests = 0;
     while (true) {
         ++nodesVisited;
         const WideLinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
+                    simdTriangleTests += (int) std::ceil(node->nPrimitives / (float)TreeWidth);
                 // Intersect ray with primitives in leaf BVH node
                 for (size_t i = 0; i < node->nPrimitives; ++i) {
                     // Check for intersection with primitive in BVH node
@@ -1336,18 +1336,12 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
 
             } else {
+                ++simdNodesVisited;
                 int i = -1;
                 currentNodeIndex = -1;
                 const int *idxArr =
                     traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
                                   [dirIsNeg[node->Axis2()]];
-                //MAth below for dirNeg n | y
-                /*
-                * idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
-                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
-                */
                 while (currentNodeIndex < 0 && ++i < TreeWidth){
                     currentNodeIndex = node->childOffsets[idxArr[i]];
                 }
@@ -1362,7 +1356,8 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
             currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
     }
-
+    bvhSimdTriangleTests += simdTriangleTests;
+    bvhSimdNodesVisited += simdNodesVisited;
     bvhNodesVisited += nodesVisited;
     return si;
 }
@@ -1380,8 +1375,7 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     while (true) {
         ++nodesVisited;
         const WideLinearBVHNode *node = &nodes[currentNodeIndex];
-        if (!node->IsEmpty()
-            && node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             // Process BVH node _node_ for traversal
             if (node->nPrimitives > 0) {
                 for (int i = 0; i < node->nPrimitives; ++i) {
