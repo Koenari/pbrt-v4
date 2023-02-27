@@ -380,22 +380,6 @@ Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
     return nodes[0].bounds;
 }
-int WideBVHAggregate::getRelevantAxisIdx(int child1Idx, int child2Idx) {
-    if (child1Idx == child2Idx)
-        return -1;
-    if (child2Idx < child1Idx) {
-        int temp = child1Idx;
-        child1Idx = child2Idx;
-        child2Idx = temp;
-    }
-    if (child2Idx > 3)
-        return -1;
-    if (child2Idx - child1Idx == 1)
-        return child1Idx;
-    if (child2Idx - child1Idx > 1)
-        return 1;
-    return -1;
-};
 
 bool WideBVHAggregate::optimizeTree(
     WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat) {
@@ -423,15 +407,13 @@ bool WideBVHAggregate::optimizeTree(
                     newChildren[curIdx] = parent->children[parIdx];
                     if (lastParIdx >= 0) {
                         newAxis[curIdx - 1] =
-                            parent->splitAxis[getRelevantAxisIdx(
-                                lastParIdx, parIdx)];
+                            parent->splitAxis[relevantAxisIdx[lastParIdx][parIdx]];
                     }
                     lastParIdx = parIdx;
                     curIdx++;
                 }
                 if (curIdx > 0)
-                    newAxis[curIdx - 1] = parent->splitAxis[getRelevantAxisIdx(
-                        lastParIdx, mergedChildIdx)];
+                    newAxis[curIdx - 1] = parent->splitAxis[relevantAxisIdx[lastParIdx][mergedChildIdx]];
                 int lastChildIdx = -1;
                 for (int childIdx = 0; childIdx < TreeWidth; ++childIdx) {
                     if (!child->children[childIdx])
@@ -441,7 +423,7 @@ bool WideBVHAggregate::optimizeTree(
                     newChildren[curIdx] = child->children[childIdx];
                     if (lastChildIdx >= 0) {
                         newAxis[curIdx - 1] =
-                            child->splitAxis[getRelevantAxisIdx(lastChildIdx, childIdx)];
+                            child->splitAxis[relevantAxisIdx[lastChildIdx][childIdx]];
                     }
                     lastChildIdx = childIdx;
                     curIdx++;
@@ -455,7 +437,7 @@ bool WideBVHAggregate::optimizeTree(
                     newChildren[curIdx] = parent->children[parIdx];
                     if (lastParIdx >= 0) {
                         newAxis[curIdx - 1] =
-                            parent->splitAxis[getRelevantAxisIdx(lastParIdx, parIdx)];
+                            parent->splitAxis[relevantAxisIdx[lastParIdx][parIdx]];
                     }
                     lastParIdx = parIdx;
                     curIdx++;
@@ -506,7 +488,7 @@ bool WideBVHAggregate::optimizeTree(
                 return opmtimizationDone;
             opmtimizationDone = true;
             --*totalNodes;
-            int planeBetweenChildren = parent->splitAxis[getRelevantAxisIdx(bestI,bestJ)];
+            int planeBetweenChildren = parent->splitAxis[relevantAxisIdx[bestI][bestJ]];
             auto child1 = parent->children[bestI];
             auto child2 = parent->children[bestJ];
             emptyNodes -= (TreeWidth - 1);
@@ -520,8 +502,7 @@ bool WideBVHAggregate::optimizeTree(
                     continue;
                 newChildren[curIdx] = child1->children[i];
                 if (lastIdx >= 0) {
-                    newAxis[curIdx - 1] =
-                        parent->splitAxis[getRelevantAxisIdx(lastIdx, i)];
+                    newAxis[curIdx - 1] = parent->splitAxis[relevantAxisIdx[lastIdx][i]];
                 }
                 lastIdx = i;
                 curIdx++;
@@ -535,7 +516,7 @@ bool WideBVHAggregate::optimizeTree(
                 newChildren[curIdx] = child2->children[i];
                 if (lastIdx >= 0) {
                     newAxis[curIdx - 1] =
-                        parent->splitAxis[getRelevantAxisIdx(lastIdx, i)];
+                        parent->splitAxis[relevantAxisIdx[lastIdx][i]];
                 }
                 lastIdx = i;
                 curIdx++;
@@ -1279,7 +1260,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
     // Follow ray through BVH nodes to find primitive intersections
     int toVisitOffset = 0, currentNodeIndex = 0;
-    int nodesToVisit[1024];
+    int nodesToVisit[128];
     int nodesVisited = 0;
     int simdNodesVisited = 1;
     int simdTriangleTests = 0;
@@ -1308,7 +1289,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                 ++simdNodesVisited;
                 int i = -1;
                 currentNodeIndex = -1;
-                const int *idxArr =
+                const uint8_t *idxArr =
                     traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
                                   [dirIsNeg[node->Axis2()]];
                 while (currentNodeIndex < 0 && ++i < TreeWidth){

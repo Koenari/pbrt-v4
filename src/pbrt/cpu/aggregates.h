@@ -58,7 +58,6 @@ class WideBVHAggregate {
                                  std::vector<Primitive> &orderedPrims);
     int flattenBVH(WideBVHBuildNode *node, int *offset);
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
-    static int getRelevantAxisIdx(int child1Idx, int child2Idx);
     WideBVHBuildNode *buildFromBVH(BVHBuildNode *root);
     Float splitCost(const int count, BVHSplitBucket **buckets) const;
     Float inline leafCost(const int primCount) const;
@@ -66,14 +65,21 @@ class WideBVHAggregate {
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
-    int splitVariant;
-    Float epoRatio;
+    const int splitVariant;
+    const Float epoRatio;
     static constexpr size_t TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
-    int traversalOrder[2][2][2][4] = {
+    //pre computed traversal order for all combinations of axis being negative
+    static constexpr uint8_t traversalOrder[2][2][2][4] = {
         {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},
         {{{1, 0, 2, 3}, {1, 0, 3, 2}}, {{3, 2, 0, 1}, {3, 2, 1, 0}}}};
-    ;
+    //pre computed index of the most relevant split axis between two child nodes
+    static constexpr int8_t relevantAxisIdx[4][4] = {
+        {-1, 0, 1, 1},
+        { 0,-1, 1, 1},
+        { 1, 1,-1, 2},
+        { 1, 1, 2,-1},
+    };
 };
 
 // BVHAggregate Definition
