@@ -22,6 +22,7 @@ Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prim
 struct WideBVHBuildNode;
 struct BVHBuildNode;
 struct BVHPrimitive;
+struct BVHSplitBucket;
 struct LinearBVHNode;
 struct WideLinearBVHNode;
 struct MortonPrimitive;
@@ -59,12 +60,14 @@ class WideBVHAggregate {
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
     static int getRelevantAxisIdx(int child1Idx, int child2Idx);
     WideBVHBuildNode *buildFromBVH(BVHBuildNode *root);
+    Float splitCost(const int count, BVHSplitBucket **buckets) const;
+    Float inline leafCost(const int primCount) const;
     // WideBVHAggregate Private Members
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     int splitVariant;
-    float epoRatio;
+    Float epoRatio;
     static constexpr size_t TreeWidth = 4;
     WideLinearBVHNode *nodes = nullptr;
     int traversalOrder[2][2][2][4] = {
@@ -78,7 +81,7 @@ class BVHAggregate {
   public:
     // BVHAggregate Public Methods
     BVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                 SplitMethod splitMethod = SplitMethod::SAH, bool skipCreation = true);
+                 SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f, bool skipCreation = false);
 
     static BVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
@@ -106,9 +109,10 @@ class BVHAggregate {
                                 std::vector<BVHBuildNode *> &treeletRoots, int start,
                                 int end, std::atomic<int> *totalNodes) const;
     int flattenBVH(BVHBuildNode *node, int *offset);
-
+    Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
     // BVHAggregate Private Members
     int maxPrimsInNode;
+    Float epoRatio;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     LinearBVHNode *nodes = nullptr;
