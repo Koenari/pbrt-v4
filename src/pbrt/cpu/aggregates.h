@@ -25,6 +25,7 @@ struct BVHPrimitive;
 struct BVHSplitBucket;
 struct LinearBVHNode;
 struct WideLinearBVHNode;
+struct SIMDWideLinearBVHNode;
 struct MortonPrimitive;
 enum class SplitMethod {
     SAH, HLBVH, Middle, EqualCounts, EPO
@@ -68,7 +69,9 @@ class WideBVHAggregate {
     const int splitVariant;
     const Float epoRatio;
     static constexpr size_t TreeWidth = 4;
-    WideLinearBVHNode *nodes = nullptr;
+    static constexpr int SimdWidth = 1;
+    Bounds3f bounds;
+    SIMDWideLinearBVHNode *nodes = nullptr;
     //pre computed traversal order for all combinations of axis being negative
     static constexpr uint8_t traversalOrder[2][2][2][4] = {
         {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},

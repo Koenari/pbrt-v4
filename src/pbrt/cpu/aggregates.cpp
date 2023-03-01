@@ -21,11 +21,13 @@
 namespace pbrt {
 
 STAT_MEMORY_COUNTER("Memory/BVH", treeBytes);
+STAT_MEMORY_COUNTER("BVH/Node Memory", nodeBytes);
 STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
+STAT_PIXEL_COUNTER("BVH/Triangle intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Triangle intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
 
@@ -170,33 +172,25 @@ struct BVHBuildNode {
     BVHBuildNode *children[2];
     int splitAxis, firstPrimOffset, nPrimitives;
 };
-// WideLinearBVHNode Definition (Maybe can fit in 32Byte)
-// size= 39B
-struct alignas(32) WideLinearBVHNode {
-    //2*3*sizeof(float) = 24B
-    Bounds3f bounds;
-    //3*sizeof(int) = 12B
-    union {
-        int primitivesOffset;   // leaf
-        int childOffsets[4];  // interior
-    };
-    //2 = 2B
-    uint16_t nPrimitives;  // 0 -> interior node
-    //1 = 1B
-    // x:0 y:1 z:2
-    //mains split axis in bits 0+1
-    //secondary exits in bit 2+3
-    // 7 6 | 5 4     | 3 2     | 1 0
-    //     | axis[2] | axis[1] | axis [0]
+//size = 121B
+struct alignas(32) SIMDWideLinearBVHNode {
+    //  x:0 y:1 z:2
+    // mains split axis in bits 0+1
+    // secondary exits in bit 2+3
+    //  7 6 | 5 4     | 3 2     | 1 0
+    //      | axis[2] | axis[1] | axis [0]
     uint8_t axis;
+    Bounds3f bounds[4];
+    uint16_t nPrimitives[4] = {0};
+    int offsets[4];
+    
+
     inline uint8_t Axis0() const { return axis >> 0 & 3; }
     inline uint8_t Axis1() const { return axis >> 2 & 3; }
     inline uint8_t Axis2() const { return axis >> 4 & 3; }
-    inline uint8_t ConstructAxis(int axis0,int axis1, int axis2) const 
-    { 
+    inline uint8_t ConstructAxis(int axis0, int axis1, int axis2) const {
         return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4);
     }
-    constexpr static uint8_t EmptyAxis = 0x40;
 };
     // LinearBVHNode Definition
 struct alignas(32) LinearBVHNode {
@@ -257,6 +251,7 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
     treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
+    nodeBytes += totalNodes * sizeof(LinearBVHNode);
     nodes = new LinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
@@ -270,6 +265,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
       primitives(std::move(prims)),
       splitMethod(splitMethod), splitVariant(splitVariant), epoRatio(epoRatio)  {
     CHECK(!primitives.empty());
+    CHECK_LE(sizeof(SIMDWideLinearBVHNode), 128);
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
@@ -315,14 +311,15 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     bvhPrimitives.resize(0);
     LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
-                float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
+        float(totalNodes.load() * sizeof(SIMDWideLinearBVHNode)) / (1024.f * 1024.f));
     optimizeTree(root, &totalNodes, opti);
     LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
-                float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
-    treeBytes += totalNodes * sizeof(WideLinearBVHNode) + sizeof(*this) +
+        float(totalNodes.load() * sizeof(SIMDWideLinearBVHNode)) / (1024.f * 1024.f));
+    treeBytes += totalNodes * sizeof(SIMDWideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
-    nodes = new WideLinearBVHNode[totalNodes];
+    nodeBytes += totalNodes * sizeof(SIMDWideLinearBVHNode);
+    nodes = new SIMDWideLinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
     CHECK_EQ(totalNodes.load(), offset);
@@ -380,7 +377,7 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
 }
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
-    return nodes[0].bounds;
+    return bounds;
 }
 
 bool WideBVHAggregate::optimizeTree(
@@ -576,9 +573,11 @@ WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot){
     return node;
 };
 Float WideBVHAggregate::leafCost(int primCount) const{
+    Float cost = pstd::ceil(primCount / (Float)SimdWidth);
+    //The epo part is considered a penalty only and leaf cost should be compared to the base cost
     if (splitMethod == SplitMethod::EPO)
-        return (1-epoRatio) * primCount;
-    return primCount;
+        cost = (1-epoRatio) * cost;
+    return cost;
 };
 Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
@@ -613,7 +612,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
     if (bvhPrimitives.size() < 1) {
         return nullptr;
     }
-    ++*totalNodes;
     Allocator alloc = threadAllocators.Get();
     WideBVHBuildNode *node = alloc.new_object<WideBVHBuildNode>();
     // Initialize _BVHBuildNode_ for primitive range
@@ -1251,146 +1249,158 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         totalNodes, orderedPrimsOffset, orderedPrims);
             }
         }
+        ++*totalNodes;
         node->InitInterior(axis, children);
         return node;
     }
 }
 pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                                                               Float tMax) const {
-    if (!nodes)
-        return {};
     pstd::optional<ShapeIntersection> si;
     Vector3f invDir(1 / ray.d.x, 1 / ray.d.y, 1 / ray.d.z);
     int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
+    if (!nodes || !this->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg))
+        return {};
     // Follow ray through BVH nodes to find primitive intersections
     int toVisitOffset = 0, currentNodeIndex = 0;
     int nodesToVisit[128];
-    int nodesVisited = 0;
+    int nodesVisited = 1;
     int simdNodesVisited = 1;
     int simdTriangleTests = 0;
+    int triangleTests = 0;
     while (true) {
-        ++nodesVisited;
-        const WideLinearBVHNode *node = &nodes[currentNodeIndex];
-        // Check ray against BVH node
-        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
-            if (node->nPrimitives > 0) {
-                    simdTriangleTests += (int) std::ceil(node->nPrimitives / (float)TreeWidth);
-                // Intersect ray with primitives in leaf BVH node
-                for (size_t i = 0; i < node->nPrimitives; ++i) {
-                    // Check for intersection with primitive in BVH node
-                    pstd::optional<ShapeIntersection> primSi =
-                        primitives[node->primitivesOffset + i].Intersect(ray, tMax);
-                    if (primSi) {
-                        si = primSi;
-                        tMax = si->tHit;
+        ++simdNodesVisited;
+        const SIMDWideLinearBVHNode *node = &nodes[currentNodeIndex];
+        const uint8_t *idxArr =
+            traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
+                          [dirIsNeg[node->Axis2()]];
+        for (int i = 0; i < TreeWidth; ++i) {
+            uint8_t idx = idxArr[i];
+            if (node->offsets[idx] < 0)
+                    continue;
+            ++nodesVisited;
+            if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+                //Leaf child
+                    if (node->nPrimitives[idx] > 0) {
+                    simdTriangleTests +=
+                        pstd::ceil(node->nPrimitives[idx] / (float)TreeWidth);
+                    triangleTests += node->nPrimitives[idx];
+                    // Intersect ray with primitives in leaf BVH node
+                    for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
+                        // Check for intersection with primitive in BVH node
+                        pstd::optional<ShapeIntersection> primSi =
+                            primitives[node->offsets[idx] + j].Intersect(ray, tMax);
+                        if (primSi) {
+                            si = primSi;
+                            tMax = si->tHit;
+                        }
                     }
                 }
-                if (toVisitOffset == 0)
-                    break;
-                currentNodeIndex = nodesToVisit[--toVisitOffset];
-
-            } else {
-                ++simdNodesVisited;
-                int i = -1;
-                currentNodeIndex = -1;
-                const uint8_t *idxArr =
-                    traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
-                                  [dirIsNeg[node->Axis2()]];
-                while (currentNodeIndex < 0 && ++i < TreeWidth){
-                    currentNodeIndex = node->childOffsets[idxArr[i]];
-                }
-                while (++i<TreeWidth) {
-                    if (node->childOffsets[idxArr[i]] > -1)
-                        nodesToVisit[toVisitOffset++] = node->childOffsets[idxArr[i]];
+                //Interior child
+                else {
+                    nodesToVisit[toVisitOffset++] = node->offsets[idx];
                 }
             }
-        } else {
-            if (toVisitOffset == 0)
-                break;
-            currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
+        if (toVisitOffset == 0)
+            break;
+        currentNodeIndex = nodesToVisit[--toVisitOffset];
     }
     bvhSimdTriangleTests += simdTriangleTests;
     bvhSimdNodesVisited += simdNodesVisited;
     bvhNodesVisited += nodesVisited;
+    bvhTriangleTests += triangleTests;
     return si;
 }
 
 bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
-    if (!nodes)
-        return false;
+    
     Vector3f invDir(1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z);
     int dirIsNeg[3] = {static_cast<int>(invDir.x < 0), static_cast<int>(invDir.y < 0),
                        static_cast<int>(invDir.z < 0)};
+    if (!nodes || !this->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg))
+        return false;
     int nodesToVisit[128];
     int toVisitOffset = 0, currentNodeIndex = 0;
-    int nodesVisited = 0;
-
+    int nodesVisited = 1;
+    int simdNodesVisited = 1;
+    int simdTriangleTests = 0;
+    int triangleTests = 0;
     while (true) {
-        ++nodesVisited;
-        const WideLinearBVHNode *node = &nodes[currentNodeIndex];
-        if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
-            // Process BVH node _node_ for traversal
-            if (node->nPrimitives > 0) {
-                for (int i = 0; i < node->nPrimitives; ++i) {
-                    if (primitives[node->primitivesOffset + i].IntersectP(ray, tMax)) {
-                        bvhNodesVisited += nodesVisited;
-                        return true;
+        ++simdNodesVisited;
+        CHECK_GE(currentNodeIndex, 0);
+        const SIMDWideLinearBVHNode *node = &nodes[currentNodeIndex];
+        const uint8_t *idxArr =
+            traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
+                          [dirIsNeg[node->Axis2()]];
+        for (int i = 0; i < TreeWidth; ++i) {
+            uint8_t idx = idxArr[i];
+            if (node->offsets[idx] < 0)
+                continue;
+            ++nodesVisited;
+            if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+                // Leaf child
+                if (node->nPrimitives[idx] > 0) {
+                    simdTriangleTests +=
+                        std::ceil(node->nPrimitives[idx] / (float)TreeWidth);
+                    triangleTests += node->nPrimitives[idx];
+                    // Intersect ray with primitives in leaf BVH node
+                    for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
+                        // Check for intersection with primitive in BVH node
+                        if (primitives[node->offsets[j] + i].IntersectP(ray, tMax)) {
+                            return true;
+                        }
                     }
                 }
-                if (toVisitOffset == 0)
-                    break;
-                currentNodeIndex = nodesToVisit[--toVisitOffset];
-            } else {
-                int i = -1, idx;
-                currentNodeIndex = -1;
-                //First non empty child
-                while (currentNodeIndex < 0 && ++i < TreeWidth) {
-                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
-                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
-                    currentNodeIndex = node->childOffsets[idx];
-                }
-                //Other Children
-                while (++i < TreeWidth) {
-                    idx = (((i >> 1) ^ dirIsNeg[node->Axis1()]) * 2) +
-                          ((i & 1) ^ dirIsNeg[node->Axis0()]) -
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis0()])) +
-                          ((i >> 1) & ((i & 1) ^ dirIsNeg[node->Axis2()]));
-                    nodesToVisit[toVisitOffset++] = node->childOffsets[idx];
+                // Interior child
+                else {
+                    nodesToVisit[toVisitOffset++] = node->offsets[idx];
                 }
             }
-        } else {
-            if (toVisitOffset == 0)
-                break;
-            currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
+        if (toVisitOffset == 0)
+            break;
+        currentNodeIndex = nodesToVisit[--toVisitOffset];
     }
     bvhNodesVisited += nodesVisited;
     return false;
 }
 int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
-    // Create emtpy node
-    if (!node) {
-        return -1;
+    SIMDWideLinearBVHNode *linearNode = &nodes[*offset];
+    //Root node
+    if (*offset == 0) {
+        this->bounds = node->bounds;
+        // Root is leaf -> create interior with 1 leaf child
+        if (node->nPrimitives > 0) {
+            CHECK(!node->children[0] && !node->children[1] && !node->children[2] &&
+                  !node->children[3]);
+            CHECK_LT(node->nPrimitives, 65536);
+            linearNode->offsets[0] = node->firstPrimOffset;
+            linearNode->nPrimitives[0] = node->nPrimitives;
+            linearNode->offsets[1] = -1;
+            linearNode->offsets[2] = -1;
+            linearNode->offsets[3] = -1;
+            return 0;
+        }
     }
-    WideLinearBVHNode *linearNode = &nodes[*offset];
+    CHECK_EQ(node->nPrimitives, 0);
     int nodeOffset = (*offset)++;
-    linearNode->bounds = node->bounds;
-    if (node->nPrimitives > 0) {
-        CHECK(!node->children[0] && !node->children[1] && !node->children[2] &&
-              !node->children[3]);
-        CHECK_LT(node->nPrimitives, 65536);
-        linearNode->primitivesOffset = node->firstPrimOffset;
-        linearNode->nPrimitives = node->nPrimitives;
-    } else {
-        // Create interior flattened BVH node
-        linearNode->axis = linearNode->ConstructAxis(
-            node->splitAxis[0], node->splitAxis[1], node->splitAxis[2]);
-        linearNode->nPrimitives = 0;
-        for (int i = 0; i < TreeWidth; i++) {
-            linearNode->childOffsets[i] = flattenBVH(node->children[i], offset);
+    // Create interior flattened BVH node
+    linearNode->axis = linearNode->ConstructAxis(
+        node->splitAxis[0], node->splitAxis[1], node->splitAxis[2]);
+    for (int i = 0; i < TreeWidth; i++) {
+        if (node->children[i]) {
+            linearNode->bounds[i] = node->children[i]->bounds;
+            linearNode->nPrimitives[i] = node->children[i]->nPrimitives;
+            if (linearNode->nPrimitives[i] > 0)
+            {
+                linearNode->offsets[i] = node->children[i]->firstPrimOffset;
+            } else {
+                linearNode->offsets[i] = flattenBVH(node->children[i], offset);
+            }
+            
+        } else {
+            linearNode->offsets[i] = -1;
         }
         
     }
