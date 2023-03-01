@@ -289,11 +289,12 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     std::atomic<int> orderedPrimsOffset{0};
     if (method == CreationMethod::FromBVH) {
         BVHAggregate *binTree =
-            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
+            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, epoRatio, true);
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodes,
             &orderedPrimsOffset, orderedPrims);
-        root = buildFromBVH(binRoot);
+        totalNodes = 0;
+        root = buildFromBVH(binRoot, &totalNodes);
         if(opti == None)
             opti = OptimizationStrategy::All;
     } else {
@@ -549,7 +550,8 @@ bool WideBVHAggregate::optimizeTree(
     return didOptimize;
 };
 
-WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot){
+WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot,
+                                                 std::atomic<int> *totalNodes) {
     if (binRoot->nPrimitives > 0) {
         WideBVHBuildNode *leaf = new WideBVHBuildNode();
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
@@ -562,13 +564,14 @@ WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot){
     for (int i = 0; i < 2; ++i) {
         auto child = binRoot->children[i];
         if (child->nPrimitives > 0) {
-            children[i * 2] = buildFromBVH(child);
+            children[i * 2] = buildFromBVH(child, totalNodes);
             children[i * 2 + 1] = NULL;
         } else {
-            children[i * 2] = buildFromBVH(child->children[0]);
-            children[i * 2 + 1] = buildFromBVH(child->children[1]);
+            children[i * 2] = buildFromBVH(child->children[0], totalNodes);
+            children[i * 2 + 1] = buildFromBVH(child->children[1], totalNodes);
         }
     }
+    ++*totalNodes;
     node->InitInterior(axis, children);
     return node;
 };
