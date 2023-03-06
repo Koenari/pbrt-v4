@@ -26,6 +26,8 @@ STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
+STAT_COUNTER("BVH/Correct Prediction", correctPred);
+STAT_COUNTER("BVH/Wrong Prediction", wrongPred)
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
 STAT_PIXEL_COUNTER("BVH/Triangle intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Triangle intersections", bvhSimdTriangleTests);
@@ -914,16 +916,21 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 //    Allocate _BVHSplitBucket_ for SAH partition buckets
                 constexpr size_t nBuckets = 12;
                 constexpr size_t nSplits = nBuckets - 1;
-                BVHSplitBucket buckets0[nBuckets][nBuckets];
-                BVHSplitBucket buckets2[nBuckets][nBuckets];
+                Bounds3f cumCentroidBoundsAbv[nSplits];
+                Bounds3f cumCentroidBoundsBel[nSplits];
+                Bounds3f centroidBoundsAbv;
+                Bounds3f centroidBoundsBel;
+                int dim1ProposedSplit = -1;
                 //The difference in these variants lies in the dimensions used for the columns
                 if (splitVariant == 2) {
                     axis[0] = axis[2] =
                         ((centroidBounds.MaxDimensions() >> 2) & 3);
+                        centroidBoundsAbv = centroidBounds;
+                        centroidBoundsBel = centroidBounds;
                 } else {
                     //splitVarian == 3
+                    Bounds3f centroidBoundsDim1[nBuckets];
                     BVHSplitBucket dim1Buckets[nBuckets];
-                    int dim1ProposedSplit = -1;
                     // Compute proposed split on main dimension
                     for (const auto &prim : bvhPrimitives) {
                         int b =
@@ -934,27 +941,34 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         DCHECK_LT(b, nBuckets);
                         dim1Buckets[b].count++;
                         dim1Buckets[b].bounds = Union(dim1Buckets[b].bounds, prim.bounds);
+                        centroidBoundsDim1[b] =
+                            Union(centroidBoundsDim1[b], prim.Centroid());
                     }
                     // Compute costs for splitting after each bucket
-                    BVHSplitBucket tempBucketsBel[nSplits];
-                    BVHSplitBucket tempBucketsAbv[nSplits];
-                    tempBucketsBel[0].bounds = dim1Buckets[0].bounds;
-                    tempBucketsBel[0].count = dim1Buckets[0].count;
+                    BVHSplitBucket tempBucketsAbv[nBuckets];
+                    cumCentroidBoundsAbv[0] = centroidBoundsDim1[0];
+                    tempBucketsAbv[0].bounds = dim1Buckets[0].bounds;
+                    tempBucketsAbv[0].count = dim1Buckets[0].count;
                     for (int i = 1; i < nSplits; ++i) {
-                        tempBucketsBel[i].bounds =
-                            Union(tempBucketsBel[i - 1].bounds, dim1Buckets[i].bounds);
-                        tempBucketsBel[i].count =
-                            tempBucketsBel[i - 1].count + dim1Buckets[i].count;
+                        tempBucketsAbv[i].bounds =
+                            Union(tempBucketsAbv[i - 1].bounds, dim1Buckets[i].bounds);
+                        tempBucketsAbv[i].count =
+                            tempBucketsAbv[i - 1].count + dim1Buckets[i].count;
+                        cumCentroidBoundsAbv[i] =
+                            Union(cumCentroidBoundsAbv[i - 1], centroidBoundsDim1[i]);
                     }
                     // Finish initializing _costs_ using a backwards scan over splits
-
-                    tempBucketsAbv[nSplits - 1].bounds = dim1Buckets[nSplits].bounds;
-                    tempBucketsAbv[nSplits - 1].count = dim1Buckets[nSplits].count;
+                    BVHSplitBucket tempBucketsBel[nSplits];
+                    cumCentroidBoundsBel[nSplits-1] = centroidBoundsDim1[nSplits];
+                    tempBucketsBel[nSplits - 1].bounds = dim1Buckets[nSplits].bounds;
+                    tempBucketsBel[nSplits - 1].count = dim1Buckets[nSplits].count;
                     for (int i = nSplits - 1; i >= 1; --i) {
-                        tempBucketsAbv[i - 1].bounds =
-                            Union(tempBucketsAbv[i].bounds, dim1Buckets[i].bounds);
-                        tempBucketsAbv[i - 1].count =
-                            tempBucketsAbv[i].count + dim1Buckets[i].count;
+                        tempBucketsBel[i - 1].bounds =
+                            Union(tempBucketsBel[i].bounds, dim1Buckets[i].bounds);
+                        tempBucketsBel[i - 1].count =
+                            tempBucketsBel[i].count + dim1Buckets[i].count;
+                        cumCentroidBoundsBel[i - 1] =
+                            Union(cumCentroidBoundsBel[i], centroidBoundsDim1[i]);
                     }
                     // Find bucket to split at that minimizes metric
                     Float minCost = Infinity;
@@ -971,150 +985,170 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                         }
                     }
                     CHECK_GE(dim1ProposedSplit, 0);
+                    centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
+                    centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
                     //Approximate best sunbsequent split axis by using the max dimension for most probable split on main dimension
-                    axis[0] = tempBucketsAbv[dim1ProposedSplit].bounds.MaxDimension();
-                    axis[2] = tempBucketsBel[dim1ProposedSplit].bounds.MaxDimension();
+                    axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
+                    axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
                 }
-                // Initialize _BVHSplitBucket_ for SAH partition buckets
-                for (const auto &prim : bvhPrimitives) {
-                    int b1 = nBuckets * centroidBounds.Offset(prim.Centroid())[axis[1]];
-                    if (b1 == nBuckets)
-                        b1 = nBuckets - 1;
-                    DCHECK_GE(b1, 0);
-                    DCHECK_LT(b1, nBuckets);
-                    int b0 = nBuckets * centroidBounds.Offset(prim.Centroid())[axis[0]];
-                    if (b0 == nBuckets)
-                        b0 = nBuckets - 1;
-                    int b2 = nBuckets * centroidBounds.Offset(prim.Centroid())[axis[2]];
-                    if (b2 == nBuckets)
-                        b2 = nBuckets - 1;
-                    DCHECK_GE(b0, 0);
-                    DCHECK_LT(b0, nBuckets);
-                    DCHECK_GE(b2, 0);
-                    DCHECK_LT(b2, nBuckets);
-                    buckets0[b1][b0].count++;
-                    buckets0[b1][b0].bounds = Union(buckets0[b1][b2].bounds, prim.bounds);
-                    buckets2[b1][b2].count++;
-                    buckets2[b1][b2].bounds = Union(buckets2[b1][b2].bounds, prim.bounds);
-                }
-
-                //[dim1Idx][dim2Idx]
-
-                float costs[nSplits][nSplits] = {};
-                std::vector<std::vector<BVHSplitBucket>> dim1Above =
-                    std::vector(nSplits,std::vector<BVHSplitBucket>(nBuckets));   
-                //BVHSplitBucket dim1Above[nSplits][nBuckets] = {};
-                std::vector<std::vector<BVHSplitBucket>> dim1Below =
-                    std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets));
-                std::vector<std::vector<BVHSplitBucket>> bucketsAboveL =
-                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
-                std::vector<std::vector<BVHSplitBucket>> bucketsBelowL =
-                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
-                std::vector<std::vector<BVHSplitBucket>> bucketsAboveR =
-                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
-                std::vector<std::vector<BVHSplitBucket>> bucketsBelowR =
-                    std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
-                // Compute costs for potential splits
-                // Compute dimensions independent
-                // For each column precompute rows O(2 * nBuckets * (nBuckets-1))
-                for (int col = 0; col < nBuckets; ++col) {
-                    // precompute above
-                    dim1Above[0][col].bounds = buckets0[0][col].bounds;
-                    dim1Above[0][col].count = buckets0[0][col].count;
-                    for (size_t i = 1; i < nSplits; ++i) {
-                        dim1Above[i][col].bounds =
-                            Union(dim1Above[i - 1][col].bounds, buckets0[i][col].bounds);
-                        dim1Above[i][col].count =
-                            dim1Above[i - 1][col].count + buckets0[i][col].count;
-                    }
-                    // precompute below
-                    dim1Below[nSplits - 1][col].bounds = buckets2[nSplits][col].bounds;
-                    dim1Below[nSplits - 1][col].count = buckets2[nSplits][col].count;
-                    for (size_t i = nSplits - 1; i >= 1; --i) {
-                        dim1Below[i - 1][col].bounds =
-                            Union(dim1Below[i][col].bounds, buckets2[i][col].bounds);
-                        dim1Below[i - 1][col].count =
-                            dim1Below[i][col].count + buckets2[i][col].count;
-                    }
-                }
-                // Compute costs for splits above(rows < splitRow) by summing precomputed
-                // values
-                for (size_t row = 0; row < nSplits; row++) {
-                    // Comute splits above (j<i)
-                    bucketsAboveL[row][0].bounds = dim1Above[row][0].bounds;
-                    bucketsAboveL[row][0].count = dim1Above[row][0].count;
-                    for (size_t col = 1; col < nSplits; ++col) {
-                        bucketsAboveL[row][col].bounds =
-                            Union(bucketsAboveL[row][col-1].bounds, dim1Above[row][col].bounds);
-                        bucketsAboveL[row][col].count =
-                            bucketsAboveL[row][col - 1].count + dim1Above[row][col].count;
-                    }
-                    bucketsAboveR[row][nSplits - 1].bounds =
-                        dim1Above[row][nSplits].bounds;
-                    bucketsAboveR[row][nSplits - 1].count =
-                        dim1Above[row][nSplits].count;  
-                    for (size_t col = nSplits - 1; col >= 1; --col) {
-                        bucketsAboveR[row][col - 1].bounds =
-                            Union(bucketsAboveR[row][col].bounds,
-                                  dim1Above[row][col].bounds);
-                        bucketsAboveR[row][col - 1].count =
-                            bucketsAboveR[row][col].count + dim1Above[row][col].count;
-                    }
-                }
-                // Compute costs for splits below(rows > splitRow) by summing precomputed
-                // values
-                for (size_t row = 0; row < nSplits; row++) {
-                    // Comute splits below (j>i)
-                    bucketsBelowL[row][0].bounds = dim1Below[row][0].bounds;
-                    bucketsBelowL[row][0].count = dim1Below[row][0].count;
-                    for (size_t col = 1; col < nSplits; ++col) {
-                        bucketsBelowL[row][col].bounds =
-                            Union(bucketsBelowL[row][col - 1].bounds,
-                                  dim1Below[row][col].bounds);
-                        bucketsBelowL[row][col].count =
-                            bucketsBelowL[row][col - 1].count + dim1Below[row][col].count;
-                    }
-                    bucketsBelowR[row][nSplits - 1].bounds =
-                        dim1Below[row][nSplits].bounds;
-                    bucketsBelowR[row][nSplits - 1].count =
-                        dim1Below[row][nSplits].count;
-                    for (size_t col = nSplits - 1; col >= 1; --col) {
-                        bucketsBelowR[row][col - 1].bounds = Union(
-                            bucketsBelowR[row][col].bounds, dim1Below[row][col].bounds);
-                        bucketsBelowR[row][col - 1].count =
-                            bucketsBelowR[row][col].count + dim1Below[row][col].count;
-                    }
-                }
+                Float minCost = Infinity;
                 int minCostRow = -1;
                 int minCostColAbove = -1;
                 int minCostColBelow = -1;
-                Float minCost = Infinity;
-                BVHSplitBucket *curBuckets[4];
-                for (size_t row = 0; row < nSplits; ++row) {
-                    for (size_t colAbove = 0; colAbove < nSplits; ++colAbove) {
-                        for (size_t colBelow = 0; colBelow < nSplits; ++colBelow) {
-                            // Compute cost for candidate split and update minimum if
-                            // necessary
-                            curBuckets[0] = &bucketsAboveL[row][colAbove];
-                            curBuckets[1] = &bucketsAboveR[row][colAbove];
-                            curBuckets[2] = &bucketsBelowL[row][colBelow];
-                            curBuckets[3] = &bucketsBelowR[row][colBelow];
-                            CHECK_EQ(bvhPrimitives.size(), curBuckets[0]->count +
-                                                            curBuckets[1]->count +
-                                         curBuckets[2]->count + curBuckets[3]->count);
+                do {
+                    if (minCostRow != -1) {
+                        dim1ProposedSplit = minCostRow;
+                        centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
+                        centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
+                        // Approximate best sunbsequent split axis by using the max
+                        // dimension for most probable split on main dimension
+                        axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
+                        axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
+                    }
+                    BVHSplitBucket buckets0[nBuckets][nBuckets];
+                    BVHSplitBucket buckets2[nBuckets][nBuckets];
+                    // Initialize _BVHSplitBucket_ for SAH partition buckets
+                    for (const auto &prim : bvhPrimitives) {
+                        int b1 = nBuckets * centroidBounds.Offset(prim.Centroid())[axis[1]];
+                        if (b1 == nBuckets)
+                            b1 = nBuckets - 1;
+                        DCHECK_GE(b1, 0);
+                        DCHECK_LT(b1, nBuckets);
+                        int b0 =
+                            nBuckets * centroidBoundsAbv.Offset(prim.Centroid())[axis[0]];
+                        if (b0 >= nBuckets)
+                            b0 = nBuckets - 1;
+                        int b2 =
+                            nBuckets * centroidBoundsBel.Offset(prim.Centroid())[axis[2]];
+                        if (b2 >= nBuckets)
+                            b2 = nBuckets - 1;
+                        DCHECK_GE(b0, 0);
+                        DCHECK_LT(b0, nBuckets);
+                        DCHECK_GE(b2, 0);
+                        DCHECK_LT(b2, nBuckets);
+                        buckets0[b1][b0].count++;
+                        buckets0[b1][b0].bounds = Union(buckets0[b1][b2].bounds, prim.bounds);
+                        buckets2[b1][b2].count++;
+                        buckets2[b1][b2].bounds = Union(buckets2[b1][b2].bounds, prim.bounds);
+                    }
+
+                    //[dim1Idx][dim2Idx]
+                    std::vector<std::vector<BVHSplitBucket>> dim1Above =
+                        std::vector(nSplits,std::vector<BVHSplitBucket>(nBuckets));   
+                    //BVHSplitBucket dim1Above[nSplits][nBuckets] = {};
+                    std::vector<std::vector<BVHSplitBucket>> dim1Below =
+                        std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets));
+                    std::vector<std::vector<BVHSplitBucket>> bucketsAboveL =
+                        std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                    std::vector<std::vector<BVHSplitBucket>> bucketsBelowL =
+                        std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                    std::vector<std::vector<BVHSplitBucket>> bucketsAboveR =
+                        std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                    std::vector<std::vector<BVHSplitBucket>> bucketsBelowR =
+                        std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits));
+                    // Compute costs for potential splits
+                    // Compute dimensions independent
+                    // For each column precompute rows O(2 * nBuckets * (nBuckets-1))
+                    for (int col = 0; col < nBuckets; ++col) {
+                        // precompute above
+                        dim1Above[0][col].bounds = buckets0[0][col].bounds;
+                        dim1Above[0][col].count = buckets0[0][col].count;
+                        for (size_t i = 1; i < nSplits; ++i) {
+                            dim1Above[i][col].bounds =
+                                Union(dim1Above[i - 1][col].bounds, buckets0[i][col].bounds);
+                            dim1Above[i][col].count =
+                                dim1Above[i - 1][col].count + buckets0[i][col].count;
+                        }
+                        // precompute below
+                        dim1Below[nSplits - 1][col].bounds = buckets2[nSplits][col].bounds;
+                        dim1Below[nSplits - 1][col].count = buckets2[nSplits][col].count;
+                        for (size_t i = nSplits - 1; i >= 1; --i) {
+                            dim1Below[i - 1][col].bounds =
+                                Union(dim1Below[i][col].bounds, buckets2[i][col].bounds);
+                            dim1Below[i - 1][col].count =
+                                dim1Below[i][col].count + buckets2[i][col].count;
+                        }
+                    }
+                    // Compute costs for splits above(rows < splitRow) by summing precomputed
+                    // values
+                    for (size_t row = 0; row < nSplits; row++) {
+                        // Comute splits above (j<i)
+                        bucketsAboveL[row][0].bounds = dim1Above[row][0].bounds;
+                        bucketsAboveL[row][0].count = dim1Above[row][0].count;
+                        for (size_t col = 1; col < nSplits; ++col) {
+                            bucketsAboveL[row][col].bounds =
+                                Union(bucketsAboveL[row][col-1].bounds, dim1Above[row][col].bounds);
+                            bucketsAboveL[row][col].count =
+                                bucketsAboveL[row][col - 1].count + dim1Above[row][col].count;
+                        }
+                        bucketsAboveR[row][nSplits - 1].bounds =
+                            dim1Above[row][nSplits].bounds;
+                        bucketsAboveR[row][nSplits - 1].count =
+                            dim1Above[row][nSplits].count;  
+                        for (size_t col = nSplits - 1; col >= 1; --col) {
+                            bucketsAboveR[row][col - 1].bounds =
+                                Union(bucketsAboveR[row][col].bounds,
+                                      dim1Above[row][col].bounds);
+                            bucketsAboveR[row][col - 1].count =
+                                bucketsAboveR[row][col].count + dim1Above[row][col].count;
+                        }
+                    }
+                    // Compute costs for splits below(rows > splitRow) by summing precomputed
+                    // values
+                    for (size_t row = 0; row < nSplits; row++) {
+                        // Comute splits below (j>i)
+                        bucketsBelowL[row][0].bounds = dim1Below[row][0].bounds;
+                        bucketsBelowL[row][0].count = dim1Below[row][0].count;
+                        for (size_t col = 1; col < nSplits; ++col) {
+                            bucketsBelowL[row][col].bounds =
+                                Union(bucketsBelowL[row][col - 1].bounds,
+                                      dim1Below[row][col].bounds);
+                            bucketsBelowL[row][col].count =
+                                bucketsBelowL[row][col - 1].count + dim1Below[row][col].count;
+                        }
+                        bucketsBelowR[row][nSplits - 1].bounds =
+                            dim1Below[row][nSplits].bounds;
+                        bucketsBelowR[row][nSplits - 1].count =
+                            dim1Below[row][nSplits].count;
+                        for (size_t col = nSplits - 1; col >= 1; --col) {
+                            bucketsBelowR[row][col - 1].bounds = Union(
+                                bucketsBelowR[row][col].bounds, dim1Below[row][col].bounds);
+                            bucketsBelowR[row][col - 1].count =
+                                bucketsBelowR[row][col].count + dim1Below[row][col].count;
+                        }
+                    }
+                    BVHSplitBucket *curBuckets[4];
+                    for (size_t row = 0; row < nSplits; ++row) {
+                        for (size_t colAbove = 0; colAbove < nSplits; ++colAbove) {
+                            for (size_t colBelow = 0; colBelow < nSplits; ++colBelow) {
+                                // Compute cost for candidate split and update minimum if
+                                // necessary
+                                curBuckets[0] = &bucketsAboveL[row][colAbove];
+                                curBuckets[1] = &bucketsAboveR[row][colAbove];
+                                curBuckets[2] = &bucketsBelowL[row][colBelow];
+                                curBuckets[3] = &bucketsBelowR[row][colBelow];
+                                CHECK_EQ(bvhPrimitives.size(), curBuckets[0]->count +
+                                                                curBuckets[1]->count +
+                                             curBuckets[2]->count + curBuckets[3]->count);
 
 
-                            float cost = splitCost(4, curBuckets);
-                            DCHECK_GT(cost,0);
-                            if (cost < minCost) {
-                                minCost = cost;
-                                minCostRow = row;
-                                minCostColAbove = colAbove;
-                                minCostColBelow = colBelow;
+                                float cost = splitCost(4, curBuckets);
+                                DCHECK_GT(cost,0);
+                                if (cost < minCost) {
+                                    minCost = cost;
+                                    minCostRow = row;
+                                    minCostColAbove = colAbove;
+                                    minCostColBelow = colBelow;
+                                }
                             }
                         }
                     }
-                }
+                    if (dim1ProposedSplit == minCostRow)
+                        ++correctPred;
+                    else
+                        ++wrongPred;
+                } while (splitVariant == 3 && minCostRow != dim1ProposedSplit);
+
                 // Can free resources here
                 // Compute leaf cost and SAH split cost for chosen split
                 minCost = 1.f /2.f + minCost / bounds.SurfaceArea();
@@ -1139,7 +1173,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 splits[1] = midIter - bvhPrimitives.begin();
                 auto midIter2 = std::partition(
                     bvhPrimitives.begin(), midIter, [=](const BVHPrimitive &bp) {
-                        int b = nBuckets * centroidBounds.Offset(bp.Centroid())[axis[0]];
+                        int b =
+                            nBuckets * centroidBoundsAbv.Offset(bp.Centroid())[axis[0]];
                         if (b == nBuckets)
                             b = nBuckets - 1;
                         return b <= minCostColAbove;
@@ -1147,7 +1182,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 splits[0] = midIter2 - bvhPrimitives.begin();
                 midIter2 = std::partition(
                     midIter, bvhPrimitives.end(), [=](const BVHPrimitive &bp) {
-                        int b = nBuckets * centroidBounds.Offset(bp.Centroid())[axis[2]];
+                        int b =
+                            nBuckets * centroidBoundsBel.Offset(bp.Centroid())[axis[2]];
                         if (b == nBuckets)
                             b = nBuckets - 1;
                         return b <= minCostColBelow;
