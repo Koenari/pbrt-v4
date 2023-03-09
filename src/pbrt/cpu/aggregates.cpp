@@ -913,8 +913,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 // Splitting on a 2 dimensional array
                 // Have a bucket array on 2 dimenions
                 //    Allocate _BVHSplitBucket_ for SAH partition buckets
-                constexpr size_t nBuckets = 12;
-                constexpr size_t nSplits = nBuckets - 1;
+                constexpr int nBuckets = 12;
+                constexpr int nSplits = nBuckets - 1;
                 Bounds3f cumCentroidBoundsAbv[nSplits];
                 Bounds3f cumCentroidBoundsBel[nSplits];
                 Bounds3f centroidBoundsAbv;
@@ -1018,10 +1018,14 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             nBuckets * centroidBoundsAbv.Offset(prim.Centroid())[axis[0]];
                         if (b0 >= nBuckets)
                             b0 = nBuckets - 1;
+                        if (b0 < 0)
+                            b0 = 0;
                         int b2 =
                             nBuckets * centroidBoundsBel.Offset(prim.Centroid())[axis[2]];
                         if (b2 >= nBuckets)
                             b2 = nBuckets - 1;
+                        if (b2 < 0)
+                            b2 = 0;
                         DCHECK_GE(b0, 0);
                         DCHECK_LT(b0, nBuckets);
                         DCHECK_GE(b2, 0);
