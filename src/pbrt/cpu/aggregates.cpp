@@ -26,8 +26,7 @@ STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
-STAT_COUNTER("BVH/Correct Prediction", correctPred);
-STAT_COUNTER("BVH/Wrong Prediction", wrongPred)
+STAT_PERCENT("BVH/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
 STAT_PIXEL_COUNTER("BVH/Triangle intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Triangle intersections", bvhSimdTriangleTests);
@@ -267,7 +266,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
       primitives(std::move(prims)),
       splitMethod(splitMethod), splitVariant(splitVariant), epoRatio(epoRatio)  {
     CHECK(!primitives.empty());
-    CHECK_LE(sizeof(SIMDWideLinearBVHNode), 128);
+    LOG_VERBOSE("Using SIMD Width: %d", SimdWidth);
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
@@ -996,6 +995,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 int minCostColAbove = -1;
                 int minCostColBelow = -1;
                 do {
+                    //Update bounds and split row if this is not the first iteration
                     if (minCostRow != -1) {
                         dim1ProposedSplit = minCostRow;
                         centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
@@ -1143,10 +1143,12 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             }
                         }
                     }
-                    if (dim1ProposedSplit == minCostRow)
-                        ++correctPred;
-                    else
-                        ++wrongPred;
+                    if (splitVariant == 3)
+                    {
+                        ++bvhAllPrediction;
+                        if (dim1ProposedSplit != minCostRow)
+                            ++bvhWrongPrediction;
+                    }
                 } while (splitVariant == 3 && minCostRow != dim1ProposedSplit);
 
                 // Can free resources here
@@ -1338,13 +1340,13 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     pstd::optional<ShapeIntersection> si;
     Vector3f invDir(1 / ray.d.x, 1 / ray.d.y, 1 / ray.d.z);
     int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
-    if (!nodes || !this->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg))
+    if (!nodes)
         return {};
     // Follow ray through BVH nodes to find primitive intersections
     int toVisitOffset = 0, currentNodeIndex = 0;
     int nodesToVisit[128];
-    int nodesVisited = 1;
-    int simdNodesVisited = 1;
+    int nodesVisited = 0;
+    int simdNodesVisited = 0;
     int simdTriangleTests = 0;
     int triangleTests = 0;
     while (true) {
@@ -1362,7 +1364,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                 //Leaf child
                     if (node->nPrimitives[idx] > 0) {
                     simdTriangleTests +=
-                        pstd::ceil(node->nPrimitives[idx] / (float)TreeWidth);
+                        pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
                     triangleTests += node->nPrimitives[idx];
                     // Intersect ray with primitives in leaf BVH node
                     for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
@@ -1401,8 +1403,8 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
         return false;
     int nodesToVisit[128];
     int toVisitOffset = 0, currentNodeIndex = 0;
-    int nodesVisited = 1;
-    int simdNodesVisited = 1;
+    int nodesVisited = 0;
+    int simdNodesVisited = 0;
     int simdTriangleTests = 0;
     int triangleTests = 0;
     while (true) {
@@ -1421,7 +1423,7 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
                 // Leaf child
                 if (node->nPrimitives[idx] > 0) {
                     simdTriangleTests +=
-                        std::ceil(node->nPrimitives[idx] / (float)TreeWidth);
+                        pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
                     triangleTests += node->nPrimitives[idx];
                     // Intersect ray with primitives in leaf BVH node
                     for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
@@ -1442,6 +1444,9 @@ bool WideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
         currentNodeIndex = nodesToVisit[--toVisitOffset];
     }
     bvhNodesVisited += nodesVisited;
+    bvhSimdNodesVisited += simdNodesVisited;
+    bvhTriangleTests += triangleTests;
+    bvhSimdTriangleTests += simdTriangleTests;
     return false;
 }
 int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {

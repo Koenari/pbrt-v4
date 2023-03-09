@@ -69,7 +69,11 @@ class WideBVHAggregate {
     const int splitVariant;
     const Float epoRatio;
     static constexpr size_t TreeWidth = 4;
+#ifdef SIMD_WIDTH
+    static constexpr int SimdWidth = SIMD_WIDTH;
+#else
     static constexpr int SimdWidth = 1;
+#endif  // SIMD_WIDTH
     Bounds3f bounds;
     SIMDWideLinearBVHNode *nodes = nullptr;
     //pre computed traversal order for all combinations of axis being negative
