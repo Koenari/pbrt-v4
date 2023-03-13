@@ -206,11 +206,10 @@ struct alignas(32) LinearBVHNode {
 
 // BVHAggregate Method Definitions
 BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                           SplitMethod splitMethod, Float epoRatio, bool skipCreation)
+                           SplitMethod splitMethod, bool skipCreation)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
-      splitMethod(splitMethod),
-      epoRatio(epoRatio){
+      splitMethod(splitMethod){
     CHECK(!primitives.empty());
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
@@ -261,10 +260,10 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
 
 WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
                                    SplitMethod splitMethod, int splitVariant,
-                                   CreationMethod method, OptimizationStrategy opti, float epoRatio)
+                                   CreationMethod method, OptimizationStrategy opti)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
-      splitMethod(splitMethod), splitVariant(splitVariant), epoRatio(epoRatio)  {
+      splitMethod(splitMethod), splitVariant(splitVariant){
     CHECK(!primitives.empty());
     LOG_VERBOSE("Using SIMD Width: %d", SimdWidth);
     // Build BVH from _primitives_
@@ -290,7 +289,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     std::atomic<int> orderedPrimsOffset{0};
     if (method == CreationMethod::FromBVH) {
         BVHAggregate *binTree =
-            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, epoRatio, true);
+            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodes,
             &orderedPrimsOffset, orderedPrims);
@@ -375,7 +374,7 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
         epoRatio = 0.f;
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
-    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat, epoRatio);
+    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
 }
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
@@ -579,36 +578,31 @@ WideBVHBuildNode *WideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot,
 Float WideBVHAggregate::leafCost(int primCount) const{
     Float cost = pstd::ceil(primCount / (Float)SimdWidth);
     //The epo part is considered a penalty only and leaf cost should be compared to the base cost
-    if (splitMethod == SplitMethod::EPO)
-        cost = (1-epoRatio) * cost;
     return cost;
 };
 Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
         return 0.f;
-    Float sahCost = 0.f;
-    Float epoCost = 0.f;
+    Float cost = 0.f;
     for (int i = 0; i < count; ++i) {
         const BVHSplitBucket bucket = *buckets[i];
         //All metrics are 0  for empty buckets
         if (bucket.count) {
             //SAH is always the baseline cost
-            sahCost += bucket.count * bucket.bounds.SurfaceArea();
+            cost += bucket.count * bucket.bounds.SurfaceArea();
             if (splitMethod == SplitMethod::EPO) {
                 Bounds3f overlap;
                 for (int j = 0; j < count; ++j) {
                     if (j == i)
                         continue;
-                    overlap = Union(overlap, buckets[j]->bounds);
+                    overlap = pbrt::Intersect(bucket.bounds, buckets[j]->bounds);
+                    if (!overlap.IsEmpty())
+                        cost += bucket.count * overlap.SurfaceArea();
                 }
-                overlap = pbrt::Intersect(overlap, bucket.bounds);
-                if (!overlap.IsEmpty())
-                    epoCost += bucket.count * overlap.SurfaceArea();
             }
         }
     }
-    return splitMethod == SplitMethod::EPO ? (epoRatio * epoCost + (1 - epoRatio) * sahCost)
-                                           : sahCost;
+    return cost;
 }
 
 WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
@@ -1495,15 +1489,14 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
     return nodeOffset;
 }
 Float BVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
-    Float sahCost = left.count * left.bounds.SurfaceArea() + right.count * right.bounds.SurfaceArea();
+    Float cost = left.count * left.bounds.SurfaceArea() + right.count * right.bounds.SurfaceArea();
     if (splitMethod == SplitMethod::SAH)
-        return sahCost;
+        return cost;
     if (splitMethod == SplitMethod::EPO) {
         Bounds3f overlap = pbrt::Intersect(left.bounds, right.bounds);
-        Float epoCost = 0.f;
         if (!overlap.IsEmpty())
-            epoCost += (left.count + right.count) * overlap.SurfaceArea();
-        return epoRatio * epoCost + (1 - epoRatio) * sahCost;
+            cost += (left.count + right.count) * overlap.SurfaceArea();
+        return cost;
     }
     return 0.f;
 }
@@ -1650,8 +1643,6 @@ BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocat
                     }
                     // Compute leaf cost and SAH split cost for chosen split
                     Float leafCost = bvhPrimitives.size();
-                    if (splitMethod == SplitMethod::EPO)
-                        leafCost *= (1.f - epoRatio);
                     minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
 
                     // Either create leaf or split primitives at selected SAH bucket

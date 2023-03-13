@@ -43,7 +43,7 @@ class WideBVHAggregate {
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
-        OptimizationStrategy = OptimizationStrategy::All, float eopRatio = 0.5f);
+        OptimizationStrategy = OptimizationStrategy::All);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     Bounds3f Bounds() const;
@@ -67,7 +67,6 @@ class WideBVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     const int splitVariant;
-    const Float epoRatio;
     static constexpr size_t TreeWidth = 4;
 #ifdef SIMD_WIDTH
     static constexpr int SimdWidth = SIMD_WIDTH;
@@ -94,7 +93,7 @@ class BVHAggregate {
   public:
     // BVHAggregate Public Methods
     BVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                 SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f, bool skipCreation = false);
+                 SplitMethod splitMethod = SplitMethod::SAH, bool skipCreation = false);
 
     static BVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
@@ -125,7 +124,6 @@ class BVHAggregate {
     Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
     // BVHAggregate Private Members
     int maxPrimsInNode;
-    Float epoRatio;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     LinearBVHNode *nodes = nullptr;
