@@ -295,8 +295,6 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
             &orderedPrimsOffset, orderedPrims);
         totalNodes = 0;
         root = buildFromBVH(binRoot, &totalNodes);
-        if(opti == None)
-            opti = OptimizationStrategy::All;
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
                               &totalNodes, &orderedPrimsOffset, orderedPrims);
@@ -353,25 +351,25 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
         Warning(R"(WideBVH creation method "%s" unknown.  Using "direct".)", splitMethodName);
         creationMethod = CreationMethod::Direct;
     }
-    OptimizationStrategy optiStrat = OptimizationStrategy::None;
+    OptimizationStrategy optiStrat = None;
     auto optiNames = parameters.GetStringArray("optimizations");
     for each (auto optiName in optiNames) {
         if (optiName == "all") {
-            optiStrat = OptimizationStrategy::All;
+            optiStrat = All;
             break;
-        } else if (optiName == "mergeInnerChildren")
-            optiStrat = (OptimizationStrategy)( optiStrat | OptimizationStrategy::MergeInnerChildren);
-        else if (optiName == "mergeIntoParent")
-            optiStrat = (OptimizationStrategy)(optiStrat | OptimizationStrategy::MergeIntoParent);
-        else if (optiName == "mergeLeaves")
-            optiStrat = (OptimizationStrategy)(optiStrat | OptimizationStrategy::MergeLeaves);
-        else {
+        } else if (optiName == "none") {
+            optiStrat = None;
+            break;
+        } else if (optiName == "mergeInnerChildren") {
+            optiStrat = (OptimizationStrategy)(optiStrat | MergeInnerChildren);
+        } else if (optiName == "mergeIntoParent") {
+            optiStrat = (OptimizationStrategy)(optiStrat | MergeIntoParent);
+        } else if (optiName == "mergeLeaves") {
+            optiStrat = (OptimizationStrategy)(optiStrat | MergeLeaves);
+        } else {
             Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
         }
     };
-    Float epoRatio = parameters.GetOneFloat("epoRatio",0.5f);
-    if (splitMethod != SplitMethod::EPO)
-        epoRatio = 0.f;
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
@@ -384,7 +382,7 @@ Bounds3f WideBVHAggregate::Bounds() const {
 bool WideBVHAggregate::optimizeTree(
     WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat) {
     bool didOptimize = false;
-    auto mergeChildrenIntoParent = [this,totalNodes](WideBVHBuildNode *parent) {
+    auto mergeChildIntoParent = [this,totalNodes](WideBVHBuildNode *parent) {
         bool opmiziationDone = false;
         for (int mergedChildIdx = 0; mergedChildIdx < TreeWidth; ++mergedChildIdx) {
             auto child = parent->children[mergedChildIdx];
@@ -457,7 +455,37 @@ bool WideBVHAggregate::optimizeTree(
         return opmiziationDone;
     };
     //Will not implement for now as there is no benefit for now
-    auto mergeLeafChildren = [](WideBVHBuildNode *node) {};
+    auto mergeLeafChildren = [this](WideBVHBuildNode *parent) {
+        bool opmtimizationDone = false;
+        //See if any merges are benficial
+        for (int i = 0; i < TreeWidth; ++i) {
+            auto child1 = parent->children[i];
+            if (child1 == NULL || child1->nPrimitives == 0)
+                continue;
+            for (int j = i + 1; j < TreeWidth; ++j) {
+                auto child2 = parent->children[j];
+                if (child2 == NULL || child2->nPrimitives == 0)
+                    continue;
+                // Can only easily merge leaves with consecutive prims
+                if (child1->firstPrimOffset + child1->nPrimitives !=
+                    child2->firstPrimOffset)
+                    continue;
+                Bounds3f newBounds = Union(child1->bounds, child2->bounds);
+                float costReduction = child1->bounds.SurfaceArea() * leafCost(child1->nPrimitives) +
+                                    child2->bounds.SurfaceArea() * leafCost(child2->nPrimitives) -
+                                        newBounds.SurfaceArea() * leafCost(child1->nPrimitives + child2->nPrimitives);
+                if (costReduction > 0) {
+                    opmtimizationDone = true;
+                    child1->nPrimitives = child1->nPrimitives + child2->nPrimitives;
+                    parent->children[j] = NULL;
+                    i = -1;
+                    break;
+                }
+                    
+            }
+        }
+        return opmtimizationDone;
+    };
     auto mergeInnerNodeChildren = [this, totalNodes](WideBVHBuildNode *parent) {
         bool opmtimizationDone = false;
         while (true) {
@@ -539,7 +567,9 @@ bool WideBVHAggregate::optimizeTree(
     do {
         didOptimizeThisRound = false;
         if (strat & OptimizationStrategy::MergeIntoParent)
-            didOptimizeThisRound |= mergeChildrenIntoParent(root);
+            didOptimizeThisRound |= mergeChildIntoParent(root);
+        if (strat & MergeLeaves)
+            didOptimizeThisRound |= mergeLeafChildren(root);
         if (strat & OptimizationStrategy::MergeInnerChildren)
             didOptimizeThisRound |= mergeInnerNodeChildren(root);
         for (int i = 0; i < TreeWidth; ++i)
