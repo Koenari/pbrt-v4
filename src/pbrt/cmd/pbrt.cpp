@@ -21,6 +21,7 @@
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/string.h>
 #include <pbrt/wavefront/wavefront.h>
+#include <pbrt/cpu/aggregates.h>
 
 #include <string>
 #include <vector>
@@ -201,7 +202,15 @@ int main(int argc, char *argv[]) {
             ParseArg(&iter, args.end(), "wavefront", &options.wavefront, onError) ||
             ParseArg(&iter, args.end(), "write-partial-images",
                      &options.writePartialImages, onError) ||
-            ParseArg(&iter, args.end(), "upgrade", &options.upgrade, onError)) {
+            ParseArg(&iter, args.end(), "upgrade", &options.upgrade, onError) ||
+            ParseArg(&iter, args.end(), "splitMethod",
+                     &WideBVHAggregate::splitMethodOverride, onError) ||
+            ParseArg(&iter, args.end(), "splitVariant",
+                     &WideBVHAggregate::splitVariantOverride, onError) ||
+            ParseArg(&iter, args.end(), "optimizationStrategy",
+                     &WideBVHAggregate::optimizationStrategyOverride, onError) ||
+            ParseArg(&iter, args.end(), "creationMethod",
+                     &WideBVHAggregate::creationMethodOverride, onError)) {
             // success
         } else if (*iter == "--help" || *iter == "-help" || *iter == "-h") {
             usage();

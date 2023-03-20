@@ -27,19 +27,33 @@ struct LinearBVHNode;
 struct WideLinearBVHNode;
 struct SIMDWideLinearBVHNode;
 struct MortonPrimitive;
-enum class SplitMethod {
-    SAH, HLBVH, Middle, EqualCounts, EPO
+enum SplitMethod : int {
+    Undefined = -1,
+    SAH = 1, 
+    EPO = 2,
+    HLBVH = 3, 
+    Middle =4 , 
+    EqualCounts = 5
 };
 class WideBVHAggregate {
   public:
-    enum class CreationMethod {Direct, FromBVH};
-    enum OptimizationStrategy : unsigned char {
+    enum CreationMethod : char {
+        UndefinedMethod = -1,
+        Direct = 0,
+        FromBVH = 1
+    };  
+    enum OptimizationStrategy : char {
+        UndefinedStrat = -1,
         None = 0,
         MergeIntoParent = 1,
         MergeInnerChildren = 2,
         MergeLeaves = 4,
-        All = 0xFF,
+        All = 0x7F
     };
+    static int splitVariantOverride;
+    static std::string splitMethodOverride;
+    static std::string creationMethodOverride;
+    static std::string optimizationStrategyOverride;
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 

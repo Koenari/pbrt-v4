@@ -42,7 +42,10 @@ struct LBVHTreelet {
     size_t startIndex, nPrimitives;
     BVHBuildNode *buildNodes;
 };
-
+int WideBVHAggregate::splitVariantOverride = -1;
+std::string WideBVHAggregate::splitMethodOverride = std::string();
+std::string WideBVHAggregate::creationMethodOverride = std::string();
+std::string WideBVHAggregate::optimizationStrategyOverride = std::string();
 // BVHAggregate Utility Functions
 static void RadixSort(std::vector<MortonPrimitive> *v) {
     std::vector<MortonPrimitive> tempVector(v->size());
@@ -109,7 +112,6 @@ struct WideBVHBuildNode {
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = nullptr;
-        ++leafNodes;
         ++totalLeafNodes;
         totalPrimitives += n;
     }
@@ -154,7 +156,6 @@ struct BVHBuildNode {
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = nullptr;
-        ++leafNodes;
         ++totalLeafNodes;
         totalPrimitives += n;
     }
@@ -264,8 +265,9 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
       primitives(std::move(prims)),
       splitMethod(splitMethod), splitVariant(splitVariant){
     CHECK(!primitives.empty());
-    LOG_VERBOSE("Creating WideBVHAggregate: %s (%d) - %s %s", splitMethod, splitVariant,
-                method == CreationMethod::Direct ? "direct" : "fromBVH", opti);
+    LOG_VERBOSE("Creating WideBVHAggregate: SPlitmethod %d (%d) - %s - %s", (int)splitMethod, splitVariant,
+                method == CreationMethod::Direct ? "direct" : "fromBVH",
+                opti != None ? std::to_string(opti) : "no opti");
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
@@ -345,8 +347,10 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
         Warning(R"(WideBVH split method "%s" unknown.  Using "sah".)", splitMethodName);
         splitMethod = SplitMethod::SAH;
     }
-    std::string creationMethodName = parameters.GetOneString("creationmethod", "direct2");
+    std::string creationMethodName = parameters.GetOneString("creationmethod", "direct");
     CreationMethod creationMethod;
+    if (!creationMethodOverride.empty())
+        creationMethodName = creationMethodOverride;
     if (creationMethodName == "direct")
         creationMethod = CreationMethod::Direct;
     else if (creationMethodName == "frombvh")
@@ -357,6 +361,11 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
     }
     OptimizationStrategy optiStrat = None;
     auto optiNames = parameters.GetStringArray("optimizations");
+    if (!optimizationStrategyOverride.empty())
+    {
+        optiNames.clear();
+        optiNames.push_back(optimizationStrategyOverride);
+    }
     for each (auto optiName in optiNames) {
         if (optiName == "all") {
             optiStrat = All;
@@ -376,6 +385,8 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
     };
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
+    if (splitVariantOverride >= 0)
+        splitVariant = splitVariantOverride;
     return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
 }
 Bounds3f WideBVHAggregate::Bounds() const {
@@ -878,11 +889,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                             ? &emptyBucket
                                             : &bucketsBelow[split2];
                         curBuckets[3] = &bucketsAbove[split2];
-#ifdef _DEBUG
                         DCHECK_EQ(curBuckets[0]->count + curBuckets[1]->count +
                                       curBuckets[2]->count + curBuckets[3]->count,
                                   bvhPrimitives.size());
-#endif  //  _DEBUG
                         float cost = splitCost(4, curBuckets);
                         if (cost < minCost) {
                             minCost = cost;
