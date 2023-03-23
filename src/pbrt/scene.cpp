@@ -1539,7 +1539,7 @@ Primitive BasicScene::CreateAggregate(
                                   movingInstancePrimitives.end());
 
         if (instancePrimitives.size() > 1) {
-            Primitive bvh = new BVHAggregate(std::move(instancePrimitives));
+            Primitive bvh = CreateAccelerator(std::move(instancePrimitives));
             instancePrimitives.clear();
             instancePrimitives.push_back(bvh);
         }

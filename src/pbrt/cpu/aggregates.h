@@ -16,6 +16,8 @@
 
 namespace pbrt {
 
+Primitive CreateAccelerator(std::vector<Primitive> prims);
+
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters);
 

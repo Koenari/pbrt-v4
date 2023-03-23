@@ -2536,14 +2536,16 @@ KdTreeAggregate *KdTreeAggregate::Create(std::vector<Primitive> prims,
     return new KdTreeAggregate(std::move(prims), isectCost, travCost, emptyBonus,
                                maxPrims, maxDepth);
 }
-
+Primitive CreateAccelerator(std::vector<Primitive> prims) {
+    return CreateAccelerator("bvh", prims, ParameterDictionary());
+}
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters) {
     Primitive accel = nullptr;
-    if (name == "bvh")
-        accel = BVHAggregate::Create(std::move(prims), parameters);
-    else if (name == "widebvh")
+    if (name == "bvh" || name == "widebvh")
         accel = WideBVHAggregate::Create(std::move(prims), parameters);
+    else if (name == "binbvh") 
+        accel = BVHAggregate::Create(std::move(prims), parameters);
     else if (name == "kdtree")
         accel = KdTreeAggregate::Create(std::move(prims), parameters);
     else
