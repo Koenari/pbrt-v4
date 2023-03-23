@@ -29,21 +29,18 @@ struct LinearBVHNode;
 struct WideLinearBVHNode;
 struct SIMDWideLinearBVHNode;
 struct MortonPrimitive;
-enum SplitMethod : int {
-    Undefined = -1,
-    SAH = 1, 
-    EPO = 2,
-    HLBVH = 3, 
-    Middle =4 , 
-    EqualCounts = 5
-};
-class WideBVHAggregate {
+
+class BVHAggregate {
   public:
-    enum CreationMethod : char {
-        UndefinedMethod = -1,
-        Direct = 0,
-        FromBVH = 1
-    };  
+    enum SplitMethod : int {
+        Undefined = -1,
+        SAH = 1,
+        EPO = 2,
+        HLBVH = 3,
+        Middle = 4,
+        EqualCounts = 5
+    };
+    enum CreationMethod : char { UndefinedMethod = -1, Direct = 0, FromBVH = 1 };
     enum OptimizationStrategy : char {
         UndefinedStrat = -1,
         None = 0,
@@ -52,19 +49,30 @@ class WideBVHAggregate {
         MergeLeaves = 4,
         All = 0x7F
     };
+    static int maxPrimsInNodeOverride;
     static int splitVariantOverride;
     static std::string splitMethodOverride;
     static std::string creationMethodOverride;
     static std::string optimizationStrategyOverride;
+
+    virtual Bounds3f Bounds() const = 0;
+    virtual pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const = 0;
+    virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;
+
+    protected:
+
+};
+class WideBVHAggregate : BVHAggregate {
+  public:
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
         OptimizationStrategy = OptimizationStrategy::All);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
-    Bounds3f Bounds() const;
-    pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const;
-    bool IntersectP(const Ray &ray, Float tMax) const;
+    Bounds3f Bounds() const override;
+    pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const override;
+    bool IntersectP(const Ray &ray, Float tMax) const override;
 
   private:
     // WideBVHAggregate Private Methods
@@ -104,26 +112,26 @@ class WideBVHAggregate {
     };
 };
 
-// BVHAggregate Definition
-class BVHAggregate {
+// BinBVHAggregate Definition
+class BinBVHAggregate : BVHAggregate {
   public:
-    // BVHAggregate Public Methods
-    BVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
+    // BinBVHAggregate Public Methods
+    BinBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
                  SplitMethod splitMethod = SplitMethod::SAH, bool skipCreation = false);
 
-    static BVHAggregate *Create(std::vector<Primitive> prims,
+    static BinBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
 
-    Bounds3f Bounds() const;
-    pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const;
-    bool IntersectP(const Ray &ray, Float tMax) const;
+    Bounds3f Bounds() const override;
+    pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const override;
+    bool IntersectP(const Ray &ray, Float tMax) const override;
     BVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                  pstd::span<BVHPrimitive> bvhPrimitives,
                                  std::atomic<int> *totalNodes,
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims);
   private:
-    // BVHAggregate Private Methods
+    // BinBVHAggregate Private Methods
     BVHBuildNode *buildHLBVH(Allocator alloc,
                              const std::vector<BVHPrimitive> &primitiveInfo,
                              std::atomic<int> *totalNodes,
@@ -138,7 +146,7 @@ class BVHAggregate {
                                 int end, std::atomic<int> *totalNodes) const;
     int flattenBVH(BVHBuildNode *node, int *offset);
     Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
-    // BVHAggregate Private Members
+    // BinBVHAggregate Private Members
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;

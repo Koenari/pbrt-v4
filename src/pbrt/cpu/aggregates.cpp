@@ -43,11 +43,12 @@ struct LBVHTreelet {
     size_t startIndex, nPrimitives;
     BVHBuildNode *buildNodes;
 };
-int WideBVHAggregate::splitVariantOverride = -1;
-std::string WideBVHAggregate::splitMethodOverride = std::string();
-std::string WideBVHAggregate::creationMethodOverride = std::string();
-std::string WideBVHAggregate::optimizationStrategyOverride = std::string();
-    // BVHAggregate Utility Functions
+int BVHAggregate::maxPrimsInNodeOverride = -1;
+int BVHAggregate::splitVariantOverride = -1;
+std::string BVHAggregate::splitMethodOverride = std::string();
+std::string BVHAggregate::creationMethodOverride = std::string();
+std::string BVHAggregate::optimizationStrategyOverride = std::string();
+    // BinBVHAggregate Utility Functions
 static void RadixSort(std::vector<MortonPrimitive> *v) {
     std::vector<MortonPrimitive> tempVector(v->size());
     constexpr int bitsPerPass = 6;
@@ -214,8 +215,8 @@ struct alignas(32) LinearBVHNode {
     uint8_t axis;          // interior node: xyz
 };
 
-// BVHAggregate Method Definitions
-BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
+// BinBVHAggregate Method Definitions
+BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
                            SplitMethod splitMethod, bool skipCreation)
     : maxPrimsInNode(std::min(255, maxPrimsInNode)),
       primitives(std::move(prims)),
@@ -301,8 +302,8 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     std::atomic<int> orderedPrimsOffset{0};
     if (method == CreationMethod::FromBVH) {
         BVHEnableMetrics = false;
-        BVHAggregate *binTree =
-            new BVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
+        BinBVHAggregate *binTree =
+            new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
             &orderedPrimsOffset, orderedPrims);
@@ -396,6 +397,8 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
         }
     };
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
+    if (maxPrimsInNodeOverride > 0)
+        maxPrimsInNode = maxPrimsInNodeOverride;
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     if (splitVariantOverride >= 0)
         splitVariant = splitVariantOverride;
@@ -715,7 +718,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
         // Cut in 4
         int splits[3]{};
         switch (splitMethod) {
-        case pbrt::SplitMethod::Middle: {
+        case SplitMethod::Middle: {
             // Partition primitives through node's midpoint
             int dim = axis[1];
             Float pmid = (centroidBounds.pMin[dim] + centroidBounds.pMax[dim]) / 2;
@@ -758,7 +761,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
             // Fall back on equal counts if splits are malformed
             __fallthrough;
         }
-        case pbrt::SplitMethod::EqualCounts: {
+        case SplitMethod::EqualCounts: {
             int dim = axis[1];
             int dim2 = axis[0] = axis[2] = ((centroidBounds.MaxDimensions() >> 2) & 3);
             splits[1] = bvhPrimitives.size() / 2;
@@ -781,8 +784,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                              });
             break;
         }
-        case pbrt::SplitMethod::EPO:
-        case pbrt::SplitMethod::SAH: 
+        case SplitMethod::EPO:
+        case SplitMethod::SAH: 
         default:
         {
             switch (splitVariant) {
@@ -1552,7 +1555,7 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
     }
     return nodeOffset;
 }
-Float BVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
+Float BinBVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
     Float cost = left.count * left.bounds.SurfaceArea() + right.count * right.bounds.SurfaceArea();
     if (splitMethod == SplitMethod::SAH)
         return cost;
@@ -1565,7 +1568,7 @@ Float BVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
     return 0.f;
 }
 
-BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
+BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                            pstd::span<BVHPrimitive> bvhPrimitives,
                                            std::atomic<int> *totalNodes,
                                            std::atomic<int> *orderedPrimsOffset,
@@ -1770,7 +1773,7 @@ BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocat
     return node;
 }
 
-BVHBuildNode *BVHAggregate::buildHLBVH(Allocator alloc,
+BVHBuildNode *BinBVHAggregate::buildHLBVH(Allocator alloc,
                                        const std::vector<BVHPrimitive> &bvhPrimitives,
                                        std::atomic<int> *totalNodes,
                                        std::vector<Primitive> &orderedPrims) {
@@ -1832,7 +1835,7 @@ BVHBuildNode *BVHAggregate::buildHLBVH(Allocator alloc,
     return buildUpperSAH(alloc, finishedTreelets, 0, finishedTreelets.size(), totalNodes);
 }
 
-BVHBuildNode *BVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
+BVHBuildNode *BinBVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
                                      const std::vector<BVHPrimitive> &bvhPrimitives,
                                      MortonPrimitive *mortonPrims, int nPrimitives,
                                      int *totalNodes,
@@ -1886,7 +1889,7 @@ BVHBuildNode *BVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
     }
 }
 
-int BVHAggregate::flattenBVH(BVHBuildNode *node, int *offset) {
+int BinBVHAggregate::flattenBVH(BVHBuildNode *node, int *offset) {
     LinearBVHNode *linearNode = &nodes[*offset];
     linearNode->bounds = node->bounds;
     int nodeOffset = (*offset)++;
@@ -1905,12 +1908,12 @@ int BVHAggregate::flattenBVH(BVHBuildNode *node, int *offset) {
     return nodeOffset;
 }
 
-Bounds3f BVHAggregate::Bounds() const {
+Bounds3f BinBVHAggregate::Bounds() const {
     CHECK(nodes);
     return nodes[0].bounds;
 }
 
-pstd::optional<ShapeIntersection> BVHAggregate::Intersect(const Ray &ray,
+pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
                                                           Float tMax) const {
     if (!nodes)
         return {};
@@ -1964,7 +1967,7 @@ pstd::optional<ShapeIntersection> BVHAggregate::Intersect(const Ray &ray,
     return si;
 }
 
-bool BVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
+bool BinBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     if (!nodes)
         return false;
     Vector3f invDir(1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z);
@@ -2011,7 +2014,7 @@ bool BVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     return false;
 }
 
-BVHBuildNode *BVHAggregate::buildUpperSAH(Allocator alloc,
+BVHBuildNode *BinBVHAggregate::buildUpperSAH(Allocator alloc,
                                           std::vector<BVHBuildNode *> &treeletRoots,
                                           int start, int end,
                                           std::atomic<int> *totalNodes) const {
@@ -2110,11 +2113,11 @@ BVHBuildNode *BVHAggregate::buildUpperSAH(Allocator alloc,
     return node;
 }
 
-BVHAggregate *BVHAggregate::Create(std::vector<Primitive> prims,
+BinBVHAggregate *BinBVHAggregate::Create(std::vector<Primitive> prims,
                                    const ParameterDictionary &parameters) {
     std::string splitMethodName = parameters.GetOneString("splitmethod", "sah");
-    if (!WideBVHAggregate::splitMethodOverride.empty())
-        splitMethodName = WideBVHAggregate::splitMethodOverride;
+    if (!splitMethodOverride.empty())
+        splitMethodName = splitMethodOverride;
     SplitMethod splitMethod;
     if (splitMethodName == "sah")
         splitMethod = SplitMethod::SAH;
@@ -2132,7 +2135,9 @@ BVHAggregate *BVHAggregate::Create(std::vector<Primitive> prims,
     }
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
-    return new BVHAggregate(std::move(prims), maxPrimsInNode, splitMethod);
+    if (maxPrimsInNodeOverride > 0)
+        maxPrimsInNode = maxPrimsInNodeOverride;
+    return new BinBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod);
 }
 
 // KdNodeToVisit Definition
@@ -2560,7 +2565,7 @@ Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prim
     if (name == "bvh" || name == "widebvh")
         accel = WideBVHAggregate::Create(std::move(prims), parameters);
     else if (name == "binbvh") 
-        accel = BVHAggregate::Create(std::move(prims), parameters);
+        accel = BinBVHAggregate::Create(std::move(prims), parameters);
     else if (name == "kdtree")
         accel = KdTreeAggregate::Create(std::move(prims), parameters);
     else

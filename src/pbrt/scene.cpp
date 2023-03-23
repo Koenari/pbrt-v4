@@ -1498,7 +1498,7 @@ Primitive BasicScene::CreateAggregate(
 
             // Create single _Primitive_ for _prims_
             if (prims.size() > 1) {
-                Primitive bvh = new BVHAggregate(std::move(prims));
+                Primitive bvh = new BinBVHAggregate(std::move(prims));
                 prims.clear();
                 prims.push_back(bvh);
             }

@@ -84,7 +84,7 @@ std::vector<TestScene> GetScenes() {
         std::vector<Primitive> prims;
         prims.push_back(Primitive(
             new GeometricPrimitive(sphere, material, nullptr, mediumInterface)));
-        Primitive bvh(new BVHAggregate(std::move(prims)));
+        Primitive bvh(new BinBVHAggregate(std::move(prims)));
 
         // We have to do this little dance here to make sure the spectrum is
         // properly normalized (this is usually all handled inside *Light::Create())
@@ -110,7 +110,7 @@ std::vector<TestScene> GetScenes() {
         std::vector<Primitive> prims;
         prims.push_back(Primitive(
             new GeometricPrimitive(sphere, material, nullptr, mediumInterface)));
-        Primitive bvh(new BVHAggregate(std::move(prims)));
+        Primitive bvh(new BinBVHAggregate(std::move(prims)));
 
         // We have to do this little dance here to make sure the spectrum is
         // properly normalized (this is usually all handled inside *Light::Create())
@@ -149,7 +149,7 @@ std::vector<TestScene> GetScenes() {
         std::vector<Primitive> prims;
         prims.push_back(Primitive(
             new GeometricPrimitive(sphere, material, lights.back(), mediumInterface)));
-        Primitive bvh(new BVHAggregate(std::move(prims)));
+        Primitive bvh(new BinBVHAggregate(std::move(prims)));
 
         scenes.push_back({bvh, lights, "Sphere, Kd = 0.5, Le = 0.5", 1.0});
     }

@@ -203,14 +203,16 @@ int main(int argc, char *argv[]) {
             ParseArg(&iter, args.end(), "write-partial-images",
                      &options.writePartialImages, onError) ||
             ParseArg(&iter, args.end(), "upgrade", &options.upgrade, onError) ||
+            ParseArg(&iter, args.end(), "maxnodeprims", 
+                     &BVHAggregate::maxPrimsInNodeOverride, onError) ||
             ParseArg(&iter, args.end(), "splitMethod",
-                     &WideBVHAggregate::splitMethodOverride, onError) ||
+                     &BVHAggregate::splitMethodOverride, onError) ||
             ParseArg(&iter, args.end(), "splitVariant",
-                     &WideBVHAggregate::splitVariantOverride, onError) ||
+                     &BVHAggregate::splitVariantOverride, onError) ||
             ParseArg(&iter, args.end(), "optimizationStrategy",
-                     &WideBVHAggregate::optimizationStrategyOverride, onError) ||
+                     &BVHAggregate::optimizationStrategyOverride, onError) ||
             ParseArg(&iter, args.end(), "creationMethod",
-                     &WideBVHAggregate::creationMethodOverride, onError)) {
+                     &BVHAggregate::creationMethodOverride, onError)) {
             // success
         } else if (*iter == "--help" || *iter == "-help" || *iter == "-h") {
             usage();
