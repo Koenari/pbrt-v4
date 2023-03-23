@@ -19,6 +19,7 @@
 #include <tuple>
 
 namespace pbrt {
+bool BVHEnableMetrics = true;
 
 STAT_MEMORY_COUNTER("Memory/BVH", treeBytes);
 STAT_MEMORY_COUNTER("BVH/Node Memory", nodeBytes);
@@ -27,8 +28,8 @@ STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_PERCENT("BVH/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
-STAT_PIXEL_COUNTER("BVH/Triangle intersections", bvhTriangleTests);
-STAT_PIXEL_COUNTER("BVH/SIMD Triangle intersections", bvhSimdTriangleTests);
+STAT_PIXEL_COUNTER("BVH/Primitive intersections", bvhTriangleTests);
+STAT_PIXEL_COUNTER("BVH/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
 
 // MortonPrimitive Definition
@@ -46,7 +47,7 @@ int WideBVHAggregate::splitVariantOverride = -1;
 std::string WideBVHAggregate::splitMethodOverride = std::string();
 std::string WideBVHAggregate::creationMethodOverride = std::string();
 std::string WideBVHAggregate::optimizationStrategyOverride = std::string();
-// BVHAggregate Utility Functions
+    // BVHAggregate Utility Functions
 static void RadixSort(std::vector<MortonPrimitive> *v) {
     std::vector<MortonPrimitive> tempVector(v->size());
     constexpr int bitsPerPass = 6;
@@ -112,8 +113,11 @@ struct WideBVHBuildNode {
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = nullptr;
-        ++totalLeafNodes;
-        totalPrimitives += n;
+        if (BVHEnableMetrics)
+        {
+            ++totalLeafNodes;
+            totalPrimitives += n;
+        }
     }
 
     void InitInterior(int a[3], WideBVHBuildNode *c[4]) {
@@ -124,15 +128,18 @@ struct WideBVHBuildNode {
         for (int i = 0; i < 4; ++i) {
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else
+            else if (BVHEnableMetrics)
                 emptyNodes++;
         }
         splitAxis[0] = a[0];
         splitAxis[1] = a[1];
         splitAxis[2] = a[2];
         nPrimitives = 0;
-        totalNodes += 4;
-        ++interiorNodes;
+        if (BVHEnableMetrics)
+        {
+            totalNodes += 4;
+            ++interiorNodes;
+        }
     }
     Bounds3f bounds;
     WideBVHBuildNode *children[4];
@@ -156,8 +163,10 @@ struct BVHBuildNode {
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = nullptr;
-        ++totalLeafNodes;
-        totalPrimitives += n;
+        if (BVHEnableMetrics) {
+            ++totalLeafNodes;
+            totalPrimitives += n;
+        }
     }
 
     void InitInterior(int axis, BVHBuildNode *c0, BVHBuildNode *c1) {
@@ -166,7 +175,8 @@ struct BVHBuildNode {
         bounds = Union(c0->bounds, c1->bounds);
         splitAxis = axis;
         nPrimitives = 0;
-        ++interiorNodes;
+        if (BVHEnableMetrics)
+            ++interiorNodes;
     }
 
     Bounds3f bounds;
@@ -290,12 +300,14 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     std::atomic<int> totalNodesLocal{0};
     std::atomic<int> orderedPrimsOffset{0};
     if (method == CreationMethod::FromBVH) {
+        BVHEnableMetrics = false;
         BVHAggregate *binTree =
             new BVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
             &orderedPrimsOffset, orderedPrims);
         totalNodesLocal = 0;
+        BVHEnableMetrics = true;
         root = buildFromBVH(binRoot, &totalNodesLocal);
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
@@ -1410,7 +1422,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
             ++nodesVisited;
             if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
                 //Leaf child
-                    if (node->nPrimitives[idx] > 0) {
+                if (node->nPrimitives[idx] > 0) {
                     simdTriangleTests +=
                         pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
                     triangleTests += node->nPrimitives[idx];
@@ -1909,12 +1921,14 @@ pstd::optional<ShapeIntersection> BVHAggregate::Intersect(const Ray &ray,
     int toVisitOffset = 0, currentNodeIndex = 0;
     int nodesToVisit[64];
     int nodesVisited = 0;
+    int trianglesTested = 0;
     while (true) {
         ++nodesVisited;
         const LinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
+                trianglesTested += node->nPrimitives;
                 // Intersect ray with primitives in leaf BVH node
                 for (int i = 0; i < node->nPrimitives; ++i) {
                     // Check for intersection with primitive in BVH node
@@ -1945,7 +1959,7 @@ pstd::optional<ShapeIntersection> BVHAggregate::Intersect(const Ray &ray,
             currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
     }
-
+    bvhTriangleTests += trianglesTested;
     bvhNodesVisited += nodesVisited;
     return si;
 }
@@ -1959,13 +1973,14 @@ bool BVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     int nodesToVisit[64];
     int toVisitOffset = 0, currentNodeIndex = 0;
     int nodesVisited = 0;
-
+    int trianglesTested = 0;
     while (true) {
         ++nodesVisited;
         const LinearBVHNode *node = &nodes[currentNodeIndex];
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             // Process BVH node _node_ for traversal
             if (node->nPrimitives > 0) {
+                trianglesTested += node->nPrimitives;
                 for (int i = 0; i < node->nPrimitives; ++i) {
                     if (primitives[node->primitivesOffset + i].IntersectP(ray, tMax)) {
                         bvhNodesVisited += nodesVisited;
@@ -1991,6 +2006,7 @@ bool BVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
             currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
     }
+    bvhTriangleTests += trianglesTested;
     bvhNodesVisited += nodesVisited;
     return false;
 }
@@ -2097,6 +2113,8 @@ BVHBuildNode *BVHAggregate::buildUpperSAH(Allocator alloc,
 BVHAggregate *BVHAggregate::Create(std::vector<Primitive> prims,
                                    const ParameterDictionary &parameters) {
     std::string splitMethodName = parameters.GetOneString("splitmethod", "sah");
+    if (!WideBVHAggregate::splitMethodOverride.empty())
+        splitMethodName = WideBVHAggregate::splitMethodOverride;
     SplitMethod splitMethod;
     if (splitMethodName == "sah")
         splitMethod = SplitMethod::SAH;
@@ -2112,12 +2130,9 @@ BVHAggregate *BVHAggregate::Create(std::vector<Primitive> prims,
         Warning(R"(BVH split method "%s" unknown.  Using "sah".)", splitMethodName);
         splitMethod = SplitMethod::SAH;
     }
-    Float epoRatio = parameters.GetOneFloat("epoRatio", 0.5f);
-    if (splitMethod != SplitMethod::EPO)
-        epoRatio = 0.f;
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
-    return new BVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, epoRatio);
+    return new BVHAggregate(std::move(prims), maxPrimsInNode, splitMethod);
 }
 
 // KdNodeToVisit Definition
