@@ -28,6 +28,9 @@ STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_PERCENT("BVH/Empty nodes", emptyNodes, totalNodes);
 STAT_PERCENT("BVH/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
+STAT_PIXEL_RATIO("BVH/Interior Nodes hit", bvhInteriorHit, bvhInteriorTested);
+STAT_PIXEL_RATIO("BVH/Leaf Nodes hit", bvhLeavesHit, bvhLeavesTested)
+STAT_INT_DISTRIBUTION("BVH/AVg Leaf size hit", bvhAvgLeaveSizeHit);
 STAT_PIXEL_COUNTER("BVH/Primitive intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
@@ -1412,6 +1415,10 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     int simdNodesVisited = 0;
     int simdTriangleTests = 0;
     int triangleTests = 0;
+    int leavesTested = 0;
+    int leavesHit = 0;
+    int interiorTested = 0;
+    int interiorHit = 0;
     while (true) {
         ++simdNodesVisited;
         const SIMDWideLinearBVHNode *node = &nodes[currentNodeIndex];
@@ -1423,9 +1430,16 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
             if (node->offsets[idx] < 0)
                     continue;
             ++nodesVisited;
+            if (node->nPrimitives > 0) {
+                    leavesTested++;
+            } else {
+                    interiorTested++;
+            }
             if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
                 //Leaf child
                 if (node->nPrimitives[idx] > 0) {
+                    leavesHit++;
+                    bvhAvgLeaveSizeHit << (int)(node->nPrimitives[idx]);
                     simdTriangleTests +=
                         pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
                     triangleTests += node->nPrimitives[idx];
@@ -1442,6 +1456,7 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
                 }
                 //Interior child
                 else {
+                    interiorHit++;
                     nodesToVisit[toVisitOffset++] = node->offsets[idx];
                 }
             }
@@ -1454,6 +1469,10 @@ pstd::optional<ShapeIntersection> WideBVHAggregate::Intersect(const Ray &ray,
     bvhSimdNodesVisited += simdNodesVisited;
     bvhNodesVisited += nodesVisited;
     bvhTriangleTests += triangleTests;
+    bvhInteriorHit += interiorHit;
+    bvhInteriorTested += interiorTested;
+    bvhLeavesHit += leavesHit;
+    bvhLeavesTested += leavesTested;
     return si;
 }
 
@@ -1925,13 +1944,24 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
     int nodesToVisit[64];
     int nodesVisited = 0;
     int trianglesTested = 0;
+    int interiorHit = 0;
+    int interiorTested = 0;
+    int leavesHit = 0;
+    int leavesTested = 0;
     while (true) {
         ++nodesVisited;
         const LinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
+        if (node->nPrimitives > 0) {
+            leavesTested++;
+        } else {
+            interiorTested++;
+        }
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
                 trianglesTested += node->nPrimitives;
+                bvhAvgLeaveSizeHit << (int)(node->nPrimitives);
+                leavesHit++;
                 // Intersect ray with primitives in leaf BVH node
                 for (int i = 0; i < node->nPrimitives; ++i) {
                     // Check for intersection with primitive in BVH node
@@ -1947,6 +1977,7 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
 
             } else {
+                interiorHit++;
                 // Put far BVH node on _nodesToVisit_ stack, advance to near node
                 if (dirIsNeg[node->axis]) {
                     nodesToVisit[toVisitOffset++] = currentNodeIndex + 1;
@@ -1964,6 +1995,10 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
     }
     bvhTriangleTests += trianglesTested;
     bvhNodesVisited += nodesVisited;
+    bvhInteriorHit += interiorHit;
+    bvhInteriorTested += interiorTested;
+    bvhLeavesHit += leavesHit;
+    bvhLeavesTested += leavesTested;
     return si;
 }
 
