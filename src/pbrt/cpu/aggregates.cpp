@@ -654,12 +654,16 @@ Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
         return 0.f;
     Float cost = 0.f;
+    Bounds3f combinedBounds;
+    for (int i = 0; i < count; ++i)
+        combinedBounds = Union(combinedBounds, buckets[i]->bounds);
     for (int i = 0; i < count; ++i) {
+        Float curCost = 0.f;
         const BVHSplitBucket bucket = *buckets[i];
         //All metrics are 0  for empty buckets
         if (bucket.count) {
             //SAH is always the baseline cost
-            cost += leafCost(bucket.count) * bucket.bounds.SurfaceArea();
+            curCost += leafCost(bucket.count) * bucket.bounds.SurfaceArea();
             if (splitMethod == SplitMethod::EPO) {
                 Bounds3f overlap;
                 for (int j = 0; j < count; ++j) {
@@ -668,8 +672,9 @@ Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
                     overlap = Union(overlap,pbrt::Intersect(bucket.bounds, buckets[j]->bounds));
                 }
                 if (!overlap.IsEmpty())
-                    cost += leafCost(bucket.count) * overlap.SurfaceArea();
+                    curCost *= (1.f + overlap.Volume() / combinedBounds.Volume());
             }
+            cost += curCost;
         }
     }
     return cost;
@@ -1579,7 +1584,7 @@ Float BinBVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) cons
     if (splitMethod == SplitMethod::EPO) {
         Bounds3f overlap = pbrt::Intersect(left.bounds, right.bounds);
         if (!overlap.IsEmpty())
-            cost += (left.count + right.count) * overlap.SurfaceArea();
+            cost *= (1.f + overlap.Volume() / Union(left.bounds,right.bounds).Volume());
         return cost;
     }
     return 0.f;
