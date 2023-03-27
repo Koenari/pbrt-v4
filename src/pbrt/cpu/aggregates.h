@@ -54,7 +54,7 @@ class BVHAggregate {
     static std::string splitMethodOverride;
     static std::string creationMethodOverride;
     static std::string optimizationStrategyOverride;
-
+    static constexpr Float RelativeInnerCost = 1.f;
     virtual Bounds3f Bounds() const = 0;
     virtual pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const = 0;
     virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;

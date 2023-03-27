@@ -924,7 +924,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     minCostSplitBucket2 = minCostSplitBucket1;
 
                 // Compute leaf cost and SAH split cost for chosen split
-                minCost = 1.f/2.f + minCost / bounds.SurfaceArea();
+                minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
                 // Either create leaf or split primitives at selected SAH bucket
                 if (bvhPrimitives.size() > maxPrimsInNode ||
                     minCost < leafCost(bvhPrimitives.size())) {
@@ -1219,7 +1219,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
 
                 // Can free resources here
                 // Compute leaf cost and SAH split cost for chosen split
-                minCost = 1.f /2.f + minCost / bounds.SurfaceArea();
+                minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
                 if (leafCost(bvhPrimitives.size()) <= minCost && bvhPrimitives.size() <= maxPrimsInNode) {
                     int firstPrimOffset =
                         orderedPrimsOffset->fetch_add(bvhPrimitives.size());
@@ -1267,8 +1267,6 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     //Consider leaf only for whole node
                     bool leafAllowed = i == 0;
                     int mid;
-                    //int dim = i == 0 ? dim1 : dim2;
-                    
                     int count =
                         i == 0 ? bvhPrimitives.size()
                                : (i == 1 ? splits[1] : bvhPrimitives.size() - splits[1]);
@@ -1334,7 +1332,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     // Consider leaf only for first iteration
                     if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
                         // Compute leaf cost and SAH split cost for chosen 
-                        minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
+                        minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
                         if (leafCost(count) <= minCost) {
                             int firstPrimOffset =
                                 orderedPrimsOffset->fetch_add(count);
@@ -1729,7 +1727,7 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                     }
                     // Compute leaf cost and SAH split cost for chosen split
                     Float leafCost = bvhPrimitives.size();
-                    minCost = 1.f / 2.f + minCost / bounds.SurfaceArea();
+                    minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
 
                     // Either create leaf or split primitives at selected SAH bucket
                     if (bvhPrimitives.size() > maxPrimsInNode || minCost < leafCost) {
