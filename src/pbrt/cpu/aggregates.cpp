@@ -665,10 +665,10 @@ Float WideBVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
                 for (int j = 0; j < count; ++j) {
                     if (j == i)
                         continue;
-                    overlap = pbrt::Intersect(bucket.bounds, buckets[j]->bounds);
-                    if (!overlap.IsEmpty())
-                        cost += leafCost(bucket.count) * overlap.SurfaceArea();
+                    overlap = Union(overlap,pbrt::Intersect(bucket.bounds, buckets[j]->bounds));
                 }
+                if (!overlap.IsEmpty())
+                    cost += leafCost(bucket.count) * overlap.SurfaceArea();
             }
         }
     }
