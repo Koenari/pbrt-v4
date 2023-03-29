@@ -60,7 +60,17 @@ class BVHAggregate {
     virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;
 
     protected:
-
+    BVHAggregate(int maxPrimsInNode,std::vector<Primitive> p, SplitMethod splitMethod);
+    int maxPrimsInNode;
+    std::vector<Primitive> primitives;
+    SplitMethod splitMethod;
+    Float splitCost(int count, BVHSplitBucket **buckets) const;
+    Float inline leafCost(int primCount) const;
+#ifdef SIMD_WIDTH
+    static constexpr int SimdWidth = SIMD_WIDTH;
+#else
+    static constexpr int SimdWidth = 1;
+#endif  // SIMD_WIDTH
 };
 class WideBVHAggregate : BVHAggregate {
   public:
@@ -80,23 +90,13 @@ class WideBVHAggregate : BVHAggregate {
                                  pstd::span<BVHPrimitive> bvhPrimitives,
                                  std::atomic<int> *totalNodes,
                                  std::atomic<int> *orderedPrimsOffset,
-                                 std::vector<Primitive> &orderedPrims);
+                                 std::vector<Primitive> &orderedPrims,
+                                 int splitVariant);
     int flattenBVH(WideBVHBuildNode *node, int *offset);
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
     WideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
-    Float splitCost(int count, BVHSplitBucket **buckets) const;
-    Float inline leafCost(int primCount) const;
     // WideBVHAggregate Private Members
-    int maxPrimsInNode;
-    std::vector<Primitive> primitives;
-    SplitMethod splitMethod;
-    const int splitVariant;
     static constexpr size_t TreeWidth = 4;
-#ifdef SIMD_WIDTH
-    static constexpr int SimdWidth = SIMD_WIDTH;
-#else
-    static constexpr int SimdWidth = 1;
-#endif  // SIMD_WIDTH
     Bounds3f bounds;
     SIMDWideLinearBVHNode *nodes = nullptr;
     //pre computed traversal order for all combinations of axis being negative
@@ -147,9 +147,6 @@ class BinBVHAggregate : BVHAggregate {
     int flattenBVH(BVHBuildNode *node, int *offset);
     Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
     // BinBVHAggregate Private Members
-    int maxPrimsInNode;
-    std::vector<Primitive> primitives;
-    SplitMethod splitMethod;
     LinearBVHNode *nodes = nullptr;
 };
 
