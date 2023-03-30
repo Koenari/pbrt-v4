@@ -351,7 +351,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
         totalNodesLocal.load() * sizeof(SIMDWideLinearBVHNode) / (1024.f * 1024.f));
     }
     Float treeCost = calcMetrics(root, 0);
-    LOG_VERBOSE("Calulated cost for BVH is: {%.2f}",treeCost);
+    LOG_VERBOSE("Calulated cost for BVH is: {%.3f}",treeCost);
     if (totalNodes == 0)
         totalNodes++;
     treeBytes += totalNodesLocal * sizeof(SIMDWideLinearBVHNode) + sizeof(*this) +
@@ -438,7 +438,7 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode* root, int depth) {
         bvhIntNodeDepth << depth;
         ICostCalcable *nodes[4] = {root->children[0], root->children[1],
                                    root->children[2], root->children[3]};
-        Float cost = 0.f;
+        Float cost = RelativeInnerCost;
         for (int i = 0; i < TreeWidth; ++i) {
             if (!(root->children[i]))
                 continue;
@@ -543,10 +543,31 @@ bool WideBVHAggregate::optimizeTree(
                 if (child1->firstPrimOffset + child1->nPrimitives !=
                     child2->firstPrimOffset)
                     continue;
-                Bounds3f newBounds = Union(child1->bounds, child2->bounds);
-                float costReduction = child1->bounds.SurfaceArea() * leafCost(child1->nPrimitives) +
-                                    child2->bounds.SurfaceArea() * leafCost(child2->nPrimitives) -
-                                        newBounds.SurfaceArea() * leafCost(child1->nPrimitives + child2->nPrimitives);
+                //Bounds3f newBounds = Union(child1->bounds, child2->bounds);
+                ICostCalcable *oldNodes[TreeWidth];
+                for (int k = 0; k < 4; k++) {
+                    oldNodes[k] = parent->children[k];
+                }
+                BVHSplitBucket newLeaf;
+                newLeaf.bounds = Union(child1->bounds, child2->bounds);
+                newLeaf.count = child1->nPrimitives + child2->nPrimitives;
+                ICostCalcable *newNodes[TreeWidth];
+                for (int k = 0; k < 4; k++) {
+                    if (k == j) {
+                        newNodes[k] = NULL;
+                    } else if(k==i){
+                        newNodes[k] = &newLeaf;
+                    } else {
+                        newNodes[k] = oldNodes[k];
+                    }
+                }
+                float oldCost1 = penalizedHitProbability(i, TreeWidth, oldNodes) *
+                                 leafCost(child1->nPrimitives);
+                float oldCost2 = penalizedHitProbability(j, TreeWidth, oldNodes) *
+                                 leafCost(child2->nPrimitives);
+                float newCost = penalizedHitProbability(i, TreeWidth, newNodes) *
+                                leafCost(newLeaf.count);
+                float costReduction = (oldCost1+ oldCost2) - newCost;
                 if (costReduction > 0) {
                     LOG_VERBOSE("Merged two leaves");
                     opmtimizationDone = true;
@@ -576,12 +597,32 @@ bool WideBVHAggregate::optimizeTree(
                     if (child2 == NULL || child2->nPrimitives > 0)
                         continue;
                     if (child1->numChildren() + child2->numChildren() <= TreeWidth) {
-                        Bounds3f newBounds = Union(child1->bounds, child2->bounds);
-                        float SAChange = child1->bounds.SurfaceArea() +
-                                       child2->bounds.SurfaceArea() -
-                                       newBounds.SurfaceArea();
-                        if (SAChange > maxReduction) {
-                            maxReduction = SAChange;
+
+                        ICostCalcable *oldNodes[TreeWidth];
+                        for (int k = 0; k < 4; k++) {
+                            oldNodes[k] = parent->children[k];
+                        }
+                        BVHSplitBucket newNode;
+                        newNode.bounds = Union(child1->bounds, child2->bounds);
+                        newNode.count = 0;
+                        ICostCalcable *newNodes[TreeWidth];
+                        for (int k = 0; k < 4; k++) {
+                            if (k == j) {
+                                newNodes[k] = NULL;
+                            } else if (k == i) {
+                                newNodes[k] = &newNode;
+                            } else {
+                                newNodes[k] = oldNodes[k];
+                            }
+                        }
+                        BVHSplitBucket newNode{};
+                        newNode.bounds = Union(child1->bounds, child2->bounds);
+                        Float oldCost1 = penalizedHitProbability(i,TreeWidth,oldNodes);
+                        Float oldCost2 = penalizedHitProbability(j, TreeWidth, oldNodes);
+                        Float newCost = penalizedHitProbability(i, TreeWidth, newNodes);
+                        float costReduction = (oldCost1 + oldCost2) - newCost;
+                        if (costReduction > maxReduction) {
+                            maxReduction = costReduction;
                             bestI = i;
                             bestJ = j;
                         }
@@ -958,8 +999,9 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                             ? &emptyBucket
                                             : &bucketsBelow[split2];
                         curBuckets[3] = &bucketsAbove[split2];
-                        DCHECK_EQ(curBuckets[0]->count + curBuckets[1]->count +
-                                      curBuckets[2]->count + curBuckets[3]->count,
+                        DCHECK_EQ(curBuckets[0]->PrimCount() +
+                                      curBuckets[1]->PrimCount() +
+                                curBuckets[2]->PrimCount() + curBuckets[3]->PrimCount(),
                                   bvhPrimitives.size());
                         float cost = splitCost(4, curBuckets);
                         if (cost < minCost) {
@@ -1253,7 +1295,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
 
 
                                 float cost = splitCost(4, curBuckets);
-                                CHECK_GT(cost,0);
+                                DCHECK_GT(cost,0);
                                 if (cost < minCost) {
                                     minCost = cost;
                                     minCostRow = row;
