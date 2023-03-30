@@ -34,7 +34,8 @@ STAT_INT_DISTRIBUTION("BVH/AVg Leaf size hit", bvhAvgLeaveSizeHit);
 STAT_PIXEL_COUNTER("BVH/Primitive intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
-
+STAT_INT_DISTRIBUTION("BVH/Leaf Depth", bvhLeafDepth);
+STAT_INT_DISTRIBUTION("BVH/INt Node Depth", bvhIntNodeDepth);
 // MortonPrimitive Definition
 struct MortonPrimitive {
     int primitiveIndex;
@@ -95,9 +96,11 @@ static void RadixSort(std::vector<MortonPrimitive> *v) {
 }
 
 // BVHSplitBucket Definition
-struct BVHSplitBucket {
+struct BVHSplitBucket : ICostCalcable {
     int count = 0;
     Bounds3f bounds;
+    int PrimCount() const { return count; }
+    Bounds3f Bounds() const { return bounds; }
 };
 
 // BVHPrimitive Definition
@@ -111,7 +114,7 @@ struct BVHPrimitive {
     Point3f Centroid() const { return .5f * bounds.pMin + .5f * bounds.pMax; }
 };
 //Wide BVHBuildNote defintion with 4 children
-struct WideBVHBuildNode {
+struct WideBVHBuildNode : ICostCalcable{
     void InitLeaf(int first, int n, const Bounds3f &b) {
         firstPrimOffset = first;
         nPrimitives = n;
@@ -158,6 +161,21 @@ struct WideBVHBuildNode {
     };
     int splitAxis[3];
     int firstPrimOffset, nPrimitives;
+
+    Bounds3f Bounds() const { return bounds; }
+    int PrimCount() const {
+        if (nPrimitives > 0) {
+            return nPrimitives;
+        } else {
+            int count = 0;
+            for (int i = 0; i < 4; ++i) {
+                if (children[i]) {
+                    count += children[i]->PrimCount();
+                }
+            }
+            return count;
+        }
+    }
 };
     // BVHBuildNode Definition
 struct BVHBuildNode {
@@ -326,12 +344,16 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     LOG_VERBOSE("WideBVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodesLocal.load(), (int)primitives.size(),
         totalNodesLocal.load() * sizeof(SIMDWideLinearBVHNode) / (1024.f * 1024.f));
-    optimizeTree(root, &totalNodesLocal, opti);
-    if (totalNodes == 0)
-        totalNodes++;
-    LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
+    if (optimizeTree(root, &totalNodesLocal, opti)) {
+        LOG_VERBOSE(
+            "WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                 totalNodesLocal.load(), (int)primitives.size(),
         totalNodesLocal.load() * sizeof(SIMDWideLinearBVHNode) / (1024.f * 1024.f));
+    }
+    Float treeCost = calcMetrics(root, 0);
+    LOG_VERBOSE("Calulated cost for BVH is: {%.2f}",treeCost);
+    if (totalNodes == 0)
+        totalNodes++;
     treeBytes += totalNodesLocal * sizeof(SIMDWideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     nodeBytes += totalNodesLocal * sizeof(SIMDWideLinearBVHNode);
@@ -407,6 +429,25 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
     return bounds;
+}
+Float WideBVHAggregate::calcMetrics(WideBVHBuildNode* root, int depth) {
+    if (root->nPrimitives > 0) {
+        bvhLeafDepth << depth;
+        return leafCost(root->nPrimitives);
+    } else {
+        bvhIntNodeDepth << depth;
+        ICostCalcable *nodes[4] = {root->children[0], root->children[1],
+                                   root->children[2], root->children[3]};
+        Float cost = 0.f;
+        for (int i = 0; i < TreeWidth; ++i) {
+            if (!(root->children[i]))
+                continue;
+            cost +=
+                penalizedHitProbability(i, TreeWidth, nodes) *
+                calcMetrics(root->children[i], depth + 1);
+        }
+        return cost;
+    }
 }
 
 bool WideBVHAggregate::optimizeTree(
@@ -605,10 +646,11 @@ bool WideBVHAggregate::optimizeTree(
         didOptimizeThisRound = false;
         if (strat & OptimizationStrategy::MergeIntoParent)
             didOptimizeThisRound |= mergeChildIntoParent(root);
-        if (strat & MergeLeaves)
+        if (!didOptimizeThisRound && (strat & MergeLeaves))
             didOptimizeThisRound |= mergeLeafChildren(root);
-        if (strat & OptimizationStrategy::MergeInnerChildren)
+        if (!didOptimizeThisRound && (strat & OptimizationStrategy::MergeInnerChildren))
             didOptimizeThisRound |= mergeInnerNodeChildren(root);
+        if (!didOptimizeThisRound)
         for (int i = 0; i < TreeWidth; ++i)
             if (root->children[i])
                 didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes, strat);
@@ -647,31 +689,38 @@ Float BVHAggregate::leafCost(int primCount) const{
         return 0;
     return pstd::ceil(primCount / (Float)SimdWidth);
 };
-Float BVHAggregate::splitCost(int count, BVHSplitBucket **buckets) const{
-    if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
+Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **buckets) const{
+    const ICostCalcable *bucket = buckets[idx];
+    if (idx >= count || bucket == NULL)
         return 0.f;
-    Float cost = 0.f;
     Bounds3f combinedBounds;
     for (int i = 0; i < count; ++i)
-        combinedBounds = Union(combinedBounds, buckets[i]->bounds);
-    for (int i = 0; i < count; ++i) {
-        Float curCost = 0.f;
-        const BVHSplitBucket bucket = *buckets[i];
-        //All metrics are 0  for empty buckets
-        if (bucket.count) {
-            //SAH is always the baseline cost
-            curCost += leafCost(bucket.count) * bucket.bounds.SurfaceArea();
+        if (buckets[i])
+            combinedBounds = Union(combinedBounds, buckets[i]->Bounds());
+    Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
             if (splitMethod == SplitMethod::EPO) {
                 Bounds3f overlap;
                 for (int j = 0; j < count; ++j) {
-                    if (j == i)
+            if (j == idx || !(buckets[j]))
                         continue;
-                    overlap = Union(overlap,pbrt::Intersect(bucket.bounds, buckets[j]->bounds));
+            overlap =
+                Union(overlap, pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds()));
                 }
                 if (!overlap.IsEmpty())
-                    curCost *= (1.f + overlap.Volume() / combinedBounds.Volume());
+            prob *= (1.f + overlap.Volume() / combinedBounds.Volume());
+    }
+    return prob;
             }
-            cost += curCost;
+Float BVHAggregate::splitCost(int count, ICostCalcable **buckets) const {
+    if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
+        return 0.f;
+    Float cost = 0.f;
+    for (int i = 0; i < count; ++i) {
+        //All metrics are 0  for empty buckets
+        if (buckets[i] && buckets[i]->PrimCount()) {
+            //SAH is always the baseline cost
+            cost += leafCost(buckets[i]->PrimCount()) *
+                    penalizedHitProbability(i, count, buckets);
         }
     }
     return cost;
@@ -843,7 +892,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 // Find bucket to split at that minimizes SAH metric
                 int minCostSplitBucket1 = -1;
                 Float minCost = Infinity;
-                BVHSplitBucket *curBuckets[4];
+                ICostCalcable *curBuckets[4];
                 for (int i = 0; i < nSplits; ++i) {
                     // Compute cost for candidate split and update minimum if
                     // necessary
@@ -926,7 +975,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     minCostSplitBucket2 = minCostSplitBucket1;
 
                 // Compute leaf cost and SAH split cost for chosen split
-                minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
+                minCost = RelativeInnerCost + minCost;
                 // Either create leaf or split primitives at selected SAH bucket
                 if (bvhPrimitives.size() > maxPrimsInNode ||
                     minCost < leafCost(bvhPrimitives.size())) {
@@ -985,7 +1034,8 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                 Bounds3f centroidBoundsBel;
                 int dim1ProposedSplit = -1;
                 //The difference in these variants lies in the dimensions used for the columns
-                if (splitVariant == 2) {
+                bool complexSplit = splitVariant == 3;
+                if (!complexSplit) {
                     axis[0] = axis[2] =
                         ((centroidBounds.MaxDimensions() >> 2) & 3);
                         centroidBoundsAbv = centroidBounds;
@@ -1035,7 +1085,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     }
                     // Find bucket to split at that minimizes metric
                     Float minCost = Infinity;
-                    BVHSplitBucket *curBuckets[4];
+                    ICostCalcable *curBuckets[2];
                     for (int i = 0; i < nSplits; ++i) {
                         // Compute cost for candidate split and update minimum if
                         // necessary
@@ -1185,7 +1235,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                 bucketsBelowR[row][col].count + dim1Below[row][col].count;
                         }
                     }
-                    BVHSplitBucket *curBuckets[4];
+                    ICostCalcable *curBuckets[4];
                     for (size_t row = 0; row < nSplits; ++row) {
                         for (size_t colAbove = 0; colAbove < nSplits; ++colAbove) {
                             for (size_t colBelow = 0; colBelow < nSplits; ++colBelow) {
@@ -1195,13 +1245,15 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                                 curBuckets[1] = &bucketsAboveR[row][colAbove];
                                 curBuckets[2] = &bucketsBelowL[row][colBelow];
                                 curBuckets[3] = &bucketsBelowR[row][colBelow];
-                                CHECK_EQ(bvhPrimitives.size(), curBuckets[0]->count +
-                                                                curBuckets[1]->count +
-                                             curBuckets[2]->count + curBuckets[3]->count);
+                                DCHECK_EQ(bvhPrimitives.size(),
+                                         curBuckets[0]->PrimCount() +
+                                             curBuckets[1]->PrimCount() +
+                                             curBuckets[2]->PrimCount() +
+                                             curBuckets[3]->PrimCount());
 
 
                                 float cost = splitCost(4, curBuckets);
-                                DCHECK_GT(cost,0);
+                                CHECK_GT(cost,0);
                                 if (cost < minCost) {
                                     minCost = cost;
                                     minCostRow = row;
@@ -1211,17 +1263,17 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                             }
                         }
                     }
-                    if (splitVariant == 3)
+                    if (complexSplit)
                     {
                         ++bvhAllPrediction;
                         if (dim1ProposedSplit != minCostRow)
                             ++bvhWrongPrediction;
                     }
-                } while (splitVariant == 3 && minCostRow != dim1ProposedSplit);
+                } while (complexSplit && minCostRow != dim1ProposedSplit);
 
                 // Can free resources here
                 // Compute leaf cost and SAH split cost for chosen split
-                minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
+                minCost = RelativeInnerCost + minCost;
                 if (leafCost(bvhPrimitives.size()) <= minCost && bvhPrimitives.size() <= maxPrimsInNode) {
                     int firstPrimOffset =
                         orderedPrimsOffset->fetch_add(bvhPrimitives.size());
@@ -1319,7 +1371,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     // Find bucket to split at that minimizes metric
                     int minCostSplitBucket = -1;
                     Float minCost = Infinity;
-                    BVHSplitBucket *curBuckets[2];
+                    ICostCalcable *curBuckets[2];
                     for (int i = 0; i < nSplits; ++i) {
                         // Compute cost for candidate split and update minimum if
                         // necessary
@@ -1334,7 +1386,7 @@ WideBVHBuildNode *WideBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threa
                     // Consider leaf only for first iteration
                     if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
                         // Compute leaf cost and SAH split cost for chosen 
-                        minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
+                        minCost = RelativeInnerCost + minCost;
                         if (leafCost(count) <= minCost) {
                             int firstPrimOffset =
                                 orderedPrimsOffset->fetch_add(count);
@@ -1575,7 +1627,7 @@ int WideBVHAggregate::flattenBVH(WideBVHBuildNode *node, int *offset) {
     return nodeOffset;
 }
 Float BinBVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
-    BVHSplitBucket *buckets[2] = {&left, &right};
+    ICostCalcable *buckets[2] = {&left, &right};
     return BVHAggregate::splitCost(2, buckets);
 }
 
@@ -1721,7 +1773,7 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                     }
                     // Compute leaf cost and SAH split cost for chosen split
                     Float leafCost = BVHAggregate::leafCost(bvhPrimitives.size());
-                    minCost = RelativeInnerCost + minCost / bounds.SurfaceArea();
+                    minCost = RelativeInnerCost + minCost;
 
                     // Either create leaf or split primitives at selected SAH bucket
                     if (bvhPrimitives.size() > maxPrimsInNode || minCost < leafCost) {

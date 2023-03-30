@@ -30,6 +30,12 @@ struct WideLinearBVHNode;
 struct SIMDWideLinearBVHNode;
 struct MortonPrimitive;
 
+struct ICostCalcable {
+  public:
+    virtual Bounds3f Bounds() const = 0;
+    virtual int PrimCount() const = 0;
+};
+
 class BVHAggregate {
   public:
     enum SplitMethod : int {
@@ -64,7 +70,8 @@ class BVHAggregate {
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
-    Float splitCost(int count, BVHSplitBucket **buckets) const;
+    Float penalizedHitProbability(int idx, int count, ICostCalcable **buckets) const;
+    Float splitCost(int count, ICostCalcable **buckets) const;
     Float inline leafCost(int primCount) const;
 #ifdef SIMD_WIDTH
     static constexpr int SimdWidth = SIMD_WIDTH;
@@ -94,6 +101,7 @@ class WideBVHAggregate : BVHAggregate {
                                  int splitVariant);
     int flattenBVH(WideBVHBuildNode *node, int *offset);
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
+    Float calcMetrics(WideBVHBuildNode *root,int depth);
     WideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
     // WideBVHAggregate Private Members
     static constexpr size_t TreeWidth = 4;
