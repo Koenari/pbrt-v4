@@ -21,13 +21,16 @@ Primitive CreateAccelerator(std::vector<Primitive> prims);
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters);
 
-struct WideBVHBuildNode;
 struct BVHBuildNode;
+struct WideBVHBuildNode;
+struct FourWideBVHBuildNode;
+struct EightWideBVHBuildNode;
 struct BVHPrimitive;
 struct BVHSplitBucket;
 struct LinearBVHNode;
 struct WideLinearBVHNode;
-struct SIMDWideLinearBVHNode;
+struct SIMDFourWideLinearBVHNode;
+struct SIMDEightWideLinearBVHNode;
 struct MortonPrimitive;
 
 struct ICostCalcable {
@@ -61,6 +64,7 @@ class BVHAggregate {
     static std::string splitMethodOverride;
     static std::string creationMethodOverride;
     static std::string optimizationStrategyOverride;
+    static int SimdWidth;
     static constexpr Float RelativeInnerCost = 1.f;
     virtual Bounds3f Bounds() const = 0;
     virtual pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const = 0;
@@ -73,56 +77,114 @@ class BVHAggregate {
     SplitMethod splitMethod;
     Float epoRatio;
     Float penalizedHitProbability(int idx, int count, ICostCalcable **buckets) const;
+    Float childCost(int idx, int count, ICostCalcable **buckets) const;
     Float splitCost(int count, ICostCalcable **buckets) const;
     Float inline leafCost(int primCount) const;
-#ifdef SIMD_WIDTH
-    static constexpr int SimdWidth = SIMD_WIDTH;
-#else
-    static constexpr int SimdWidth = 1;
-#endif  // SIMD_WIDTH
 };
-class WideBVHAggregate : BVHAggregate {
+class WideBVHAggregate : public BVHAggregate {
   public:
-    WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
+    Bounds3f Bounds() const override;
+  protected:
+    WideBVHAggregate(int maxPrimsInNode, std::vector<Primitive> p, SplitMethod splitMethod,
+                 Float epoRatio);
+    static int constexpr MaxTreeWidth = 8;
+    virtual int TreeWidth() const = 0;
+    virtual int8_t relevantAxisIdx(int axis1, int axis2) const = 0;
+    bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes,
+                      OptimizationStrategy strat = OptimizationStrategy::All);
+    Float calcMetrics(WideBVHBuildNode *root, int depth);
+    Bounds3f bounds;
+};
+
+class FourWideBVHAggregate : public WideBVHAggregate {
+  public:
+    FourWideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
         SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f,
                      int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
         OptimizationStrategy = OptimizationStrategy::All);
-    static WideBVHAggregate *Create(std::vector<Primitive> prims,
+    static FourWideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
-    Bounds3f Bounds() const override;
+    
     pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const override;
     bool IntersectP(const Ray &ray, Float tMax) const override;
 
+  protected:
+    int TreeWidth() const override { return 4; };
+    int8_t relevantAxisIdx(int axis1, int axis2) const override;
   private:
-    // WideBVHAggregate Private Methods
-    WideBVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
+    // FourWideBVHAggregate Private Methods
+    FourWideBVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                  pstd::span<BVHPrimitive> bvhPrimitives,
                                  std::atomic<int> *totalNodes,
                                  std::atomic<int> *orderedPrimsOffset,
                                  std::vector<Primitive> &orderedPrims,
                                  int splitVariant);
-    int flattenBVH(WideBVHBuildNode *node, int *offset);
-    bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes, OptimizationStrategy strat = OptimizationStrategy::All);
-    Float calcMetrics(WideBVHBuildNode *root,int depth);
-    WideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
-    // WideBVHAggregate Private Members
-    static constexpr size_t TreeWidth = 4;
-    Bounds3f bounds;
-    SIMDWideLinearBVHNode *nodes = nullptr;
+    int flattenBVH(FourWideBVHBuildNode *node, int *offset);
+    FourWideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
+    // FourWideBVHAggregate Private Members
+    
+    
+    SIMDFourWideLinearBVHNode *nodes = nullptr;
     //pre computed traversal order for all combinations of axis being negative
     static constexpr uint8_t traversalOrder[2][2][2][4] = {
         {{{0, 1, 2, 3}, {0, 1, 3, 2}}, {{2, 3, 0, 1}, {2, 3, 1, 0}}},
         {{{1, 0, 2, 3}, {1, 0, 3, 2}}, {{3, 2, 0, 1}, {3, 2, 1, 0}}}};
     //pre computed index of the most relevant split axis between two child nodes
-    static constexpr int8_t relevantAxisIdx[4][4] = {
+    static constexpr int8_t relevantAxisIdxArr[4][4] = {
         {-1, 0, 1, 1},
         { 0,-1, 1, 1},
         { 1, 1,-1, 2},
         { 1, 1, 2,-1},
     };
 };
-
+class EightWideBVHAggregate : public WideBVHAggregate {
+  public:
+    EightWideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
+                     SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f,
+                     int splitVariant = 0, CreationMethod method = CreationMethod::Direct,
+                     OptimizationStrategy = OptimizationStrategy::All);
+    
+    static EightWideBVHAggregate *Create(std::vector<Primitive> prims,
+                                         const ParameterDictionary &parameters);
+    
+    pstd::optional<ShapeIntersection> Intersect(const Ray &ray,
+                                                Float tMax) const override;
+    bool IntersectP(const Ray &ray, Float tMax) const override;
+    
+  protected:
+    int TreeWidth() const override { return 8; };
+    int8_t relevantAxisIdx(int a1, int a2) const override {
+        return relevantAxisIdxArr[a1][a2];
+    }
+  private:
+    // FourWideBVHAggregate Private Methods
+    EightWideBVHBuildNode *buildRecursive(ThreadLocal<Allocator> &threadAllocators,
+                                     pstd::span<BVHPrimitive> bvhPrimitives,
+                                     std::atomic<int> *totalNodes,
+                                     std::atomic<int> *orderedPrimsOffset,
+                                     std::vector<Primitive> &orderedPrims,
+                                     int splitVariant);
+    EightWideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
+    int flattenBVH(EightWideBVHBuildNode *node, int *offset);
+    static int traversalIdx(int dirIsNeg[3],const SIMDEightWideLinearBVHNode *node, int idx);
+    // FourWideBVHAggregate Private Members
+    Bounds3f bounds;
+    SIMDEightWideLinearBVHNode *nodes = nullptr;
+    // pre computed traversal order for all combinations of axis being negative
+    static constexpr uint8_t traversalOrderArr[2][2][2][2][2][2][2][8] = {};
+    // pre computed index of the most relevant split axis between two child nodes
+    static constexpr int8_t relevantAxisIdxArr[8][8] = {
+        {-1, 0, 1, 1, 3, 3, 3, 3},
+        { 0,-1, 1, 1, 3, 3, 3, 3},
+        { 1, 1,-1, 2, 3, 3, 3, 3},
+        { 1, 1, 2,-1, 3, 3, 3, 3},
+        { 3, 3, 3, 1,-1, 4, 5, 5},
+        { 3, 3, 3, 1, 4,-1, 5, 5},
+        { 3, 3, 3, 1, 5, 5,-1, 6},
+        { 3, 3, 3, 1, 5, 5, 6,-1},
+    };
+};
 // BinBVHAggregate Definition
 class BinBVHAggregate : BVHAggregate {
   public:

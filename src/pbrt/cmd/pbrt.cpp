@@ -203,6 +203,8 @@ int main(int argc, char *argv[]) {
             ParseArg(&iter, args.end(), "write-partial-images",
                      &options.writePartialImages, onError) ||
             ParseArg(&iter, args.end(), "upgrade", &options.upgrade, onError) ||
+            ParseArg(&iter, args.end(), "simdWidth",
+                     &BVHAggregate::SimdWidth, onError) ||
             ParseArg(&iter, args.end(), "maxnodeprims", 
                      &BVHAggregate::maxPrimsInNodeOverride, onError) ||
             ParseArg(&iter, args.end(), "splitMethod",
