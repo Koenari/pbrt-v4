@@ -207,6 +207,8 @@ int main(int argc, char *argv[]) {
                      &BVHAggregate::maxPrimsInNodeOverride, onError) ||
             ParseArg(&iter, args.end(), "splitMethod",
                      &BVHAggregate::splitMethodOverride, onError) ||
+            ParseArg(&iter, args.end(), "epoRatio",
+                     &BVHAggregate::epoRatioOverride, onError) ||
             ParseArg(&iter, args.end(), "splitVariant",
                      &BVHAggregate::splitVariantOverride, onError) ||
             ParseArg(&iter, args.end(), "optimizationStrategy",

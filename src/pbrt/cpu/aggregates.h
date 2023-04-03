@@ -55,6 +55,7 @@ class BVHAggregate {
         MergeLeaves = 4,
         All = 0x7F
     };
+    static Float epoRatioOverride;
     static int maxPrimsInNodeOverride;
     static int splitVariantOverride;
     static std::string splitMethodOverride;
@@ -66,10 +67,11 @@ class BVHAggregate {
     virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;
 
     protected:
-    BVHAggregate(int maxPrimsInNode,std::vector<Primitive> p, SplitMethod splitMethod);
+    BVHAggregate(int maxPrimsInNode,std::vector<Primitive> p, SplitMethod splitMethod, Float epoRatio);
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
+    Float epoRatio;
     Float penalizedHitProbability(int idx, int count, ICostCalcable **buckets) const;
     Float splitCost(int count, ICostCalcable **buckets) const;
     Float inline leafCost(int primCount) const;
@@ -82,7 +84,8 @@ class BVHAggregate {
 class WideBVHAggregate : BVHAggregate {
   public:
     WideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1, 
-        SplitMethod splitMethod = SplitMethod::SAH, int splitVariant = 0, 
+        SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f,
+                     int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
         OptimizationStrategy = OptimizationStrategy::All);
     static WideBVHAggregate *Create(std::vector<Primitive> prims,
@@ -125,7 +128,8 @@ class BinBVHAggregate : BVHAggregate {
   public:
     // BinBVHAggregate Public Methods
     BinBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
-                 SplitMethod splitMethod = SplitMethod::SAH, bool skipCreation = false);
+                    SplitMethod splitMethod = SplitMethod::SAH,
+                    Float epoRatio = 0.5f, bool skipCreation = false);
 
     static BinBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);

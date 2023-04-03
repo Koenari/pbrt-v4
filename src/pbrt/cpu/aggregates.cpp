@@ -49,6 +49,7 @@ struct LBVHTreelet {
 };
 int BVHAggregate::maxPrimsInNodeOverride = -1;
 int BVHAggregate::splitVariantOverride = -1;
+Float BVHAggregate::epoRatioOverride = -1;
 std::string BVHAggregate::splitMethodOverride = std::string();
 std::string BVHAggregate::creationMethodOverride = std::string();
 std::string BVHAggregate::optimizationStrategyOverride = std::string();
@@ -235,12 +236,13 @@ struct alignas(32) LinearBVHNode {
     uint16_t nPrimitives;  // 0 -> interior node
     uint8_t axis;          // interior node: xyz
 };
-BVHAggregate::BVHAggregate(int maxPrimsInNode,std::vector<Primitive> prims, SplitMethod sm)
-    : maxPrimsInNode(maxPrimsInNode),primitives(prims), splitMethod(sm) {}
+BVHAggregate::BVHAggregate(int maxPrimsInNode,std::vector<Primitive> prims, SplitMethod sm, Float epoRatio)
+    : maxPrimsInNode(maxPrimsInNode),primitives(prims), splitMethod(sm), epoRatio(epoRatio) {}
     // BinBVHAggregate Method Definitions
 BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                           SplitMethod splitMethod, bool skipCreation)
-    : BVHAggregate(std::min(255, maxPrimsInNode),std::move(prims), splitMethod) {
+                           SplitMethod splitMethod,Float epoRatio, bool skipCreation)
+    : BVHAggregate(std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
+                   epoRatio) {
     CHECK(!primitives.empty());
     // Build BVH from _primitives_
     // Initialize _bvhPrimitives_ array for primitives
@@ -290,9 +292,10 @@ BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNod
 }
 
 WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
-                                   SplitMethod splitMethod, int splitVariant,
+                                   SplitMethod splitMethod,Float epoRatio, int splitVariant,
                                    CreationMethod method, OptimizationStrategy opti)
-    : BVHAggregate(std::min(255, maxPrimsInNode),std::move(prims), splitMethod) {
+    : BVHAggregate(std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
+                   epoRatio) {
     CHECK(!primitives.empty());
     LOG_VERBOSE("Creating WideBVHAggregate: SPlitmethod %d (%d) - %s - %s", (int)splitMethod, splitVariant,
                 method == CreationMethod::Direct ? "direct" : "fromBVH",
@@ -321,7 +324,7 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     if (method == CreationMethod::FromBVH) {
         BVHEnableMetrics = false;
         BinBVHAggregate *binTree =
-            new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod, true);
+            new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod,epoRatio, true);
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
             &orderedPrimsOffset, orderedPrims);
@@ -347,8 +350,8 @@ WideBVHAggregate::WideBVHAggregate(std::vector<Primitive> prims, int maxPrimsInN
     if (optimizeTree(root, &totalNodesLocal, opti)) {
         LOG_VERBOSE(
             "WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
-                totalNodesLocal.load(), (int)primitives.size(),
-        totalNodesLocal.load() * sizeof(SIMDWideLinearBVHNode) / (1024.f * 1024.f));
+            totalNodesLocal.load(), (int)primitives.size(),
+            totalNodesLocal.load() * sizeof(SIMDWideLinearBVHNode) / (1024.f * 1024.f));
     }
     Float treeCost = calcMetrics(root, 0);
     LOG_VERBOSE("Calulated cost for BVH is: {%.3f}",treeCost);
@@ -424,7 +427,10 @@ WideBVHAggregate *WideBVHAggregate::Create(std::vector<Primitive> prims,
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     if (splitVariantOverride >= 0)
         splitVariant = splitVariantOverride;
-    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod, splitVariant, creationMethod,optiStrat);
+    Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
+    if (epoRatioOverride >= 0)
+        epoRatio = epoRatioOverride;
+    return new WideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,epoRatio, splitVariant, creationMethod,optiStrat);
 }
 Bounds3f WideBVHAggregate::Bounds() const {
     CHECK(nodes);
@@ -692,9 +698,9 @@ bool WideBVHAggregate::optimizeTree(
         if (!didOptimizeThisRound && (strat & OptimizationStrategy::MergeInnerChildren))
             didOptimizeThisRound |= mergeInnerNodeChildren(root);
         if (!didOptimizeThisRound)
-        for (int i = 0; i < TreeWidth; ++i)
-            if (root->children[i])
-                didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes, strat);
+            for (int i = 0; i < TreeWidth; ++i)
+                if (root->children[i])
+                    didOptimizeThisRound |= optimizeTree(root->children[i], totalNodes, strat);
         didOptimize |= didOptimizeThisRound;
     } while (didOptimizeThisRound);
     return didOptimize;
@@ -739,19 +745,19 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
         if (buckets[i])
             combinedBounds = Union(combinedBounds, buckets[i]->Bounds());
     Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
-            if (splitMethod == SplitMethod::EPO) {
-                Bounds3f overlap;
-                for (int j = 0; j < count; ++j) {
+    if (splitMethod == SplitMethod::EPO) {
+        Bounds3f overlap;
+        for (int j = 0; j < count; ++j) {
             if (j == idx || !(buckets[j]))
-                        continue;
+                continue;
             overlap =
                 Union(overlap, pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds()));
-                }
-                if (!overlap.IsEmpty())
-            prob *= (1.f + overlap.Volume() / combinedBounds.Volume());
+        }
+        if (!overlap.IsEmpty())
+            prob *= (1.f + epoRatio * overlap.Volume() / combinedBounds.Volume());
     }
     return prob;
-            }
+}
 Float BVHAggregate::splitCost(int count, ICostCalcable **buckets) const {
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
         return 0.f;
@@ -2258,7 +2264,10 @@ BinBVHAggregate *BinBVHAggregate::Create(std::vector<Primitive> prims,
     int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
     if (maxPrimsInNodeOverride > 0)
         maxPrimsInNode = maxPrimsInNodeOverride;
-    return new BinBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod);
+    Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
+    if (epoRatioOverride >= 0)
+        epoRatio = epoRatioOverride;
+    return new BinBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,epoRatio);
 }
 
 // KdNodeToVisit Definition
