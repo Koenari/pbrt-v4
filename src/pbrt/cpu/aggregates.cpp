@@ -243,19 +243,15 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
     }
 
     void InitInterior(int a[7], EightWideBVHBuildNode *c[8]) {
-        children[0] = c[0];
-        children[1] = c[1];
-        children[2] = c[2];
-        children[3] = c[3];
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 8; ++i) {
+            children[i] = c[i];
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
             else if (BVHEnableMetrics)
                 emptyNodes++;
+            if (i < 7)
+                splitAxis[0] = a[0];
         }
-        splitAxis[0] = a[0];
-        splitAxis[1] = a[1];
-        splitAxis[2] = a[2];
         nPrimitives = 0;
         if (BVHEnableMetrics) {
             totalNodes += 8;
@@ -571,7 +567,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     nodeBytes += totalNodesLocal * sizeof(SIMDEightWideLinearBVHNode);
     nodes = new SIMDEightWideLinearBVHNode[totalNodesLocal];
     int offset = 0;
-    // flattenBVH(root, &offset);
+    flattenBVH(root, &offset);
     CHECK_EQ(totalNodesLocal.load(), offset);
 }
 #pragma endregion
@@ -862,7 +858,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 for (int parIdx = 0; parIdx < mergedChildIdx; ++parIdx) {
                     if (!parent->getChild(parIdx))
                         continue;
-                    DCHECK_GE(parent->newChildren[parIdx]->nPrimitives, -1);
+                    DCHECK_GE(parent->getChild(parIdx)->nPrimitives, -1);
                     DCHECK_LT(curIdx, TreeWidth());
                     newChildren[curIdx] = parent->getChild(parIdx);
                     if (lastParIdx >= 0) {
@@ -879,8 +875,8 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 for (int childIdx = 0; childIdx < TreeWidth(); ++childIdx) {
                     if (!child->getChild(childIdx))
                         continue;
-                    DCHECK_GE(child->newChildren[childIdx]->nPrimitives, -1);
-                    DCHECK_LT(curIdx, TreeWidth);
+                    DCHECK_GE(child->getChild(childIdx)->nPrimitives, -1);
+                    DCHECK_LT(curIdx, TreeWidth());
                     newChildren[curIdx] = child->getChild(childIdx);
                     if (lastChildIdx >= 0) {
                         newAxis[curIdx - 1] =
@@ -893,8 +889,8 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 for (int parIdx = mergedChildIdx + 1; parIdx < TreeWidth(); ++parIdx) {
                     if (!parent->getChild(parIdx))
                         continue;
-                    DCHECK_GE(parent->newChildren[parIdx]->nPrimitives, -1);
-                    DCHECK_LT(curIdx, TreeWidth);
+                    DCHECK_GE(parent->getChild(parIdx)->nPrimitives, -1);
+                    DCHECK_LT(curIdx, TreeWidth());
                     newChildren[curIdx] = parent->getChild(parIdx);
                     if (lastParIdx >= 0) {
                         newAxis[curIdx - 1] =
@@ -903,9 +899,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     lastParIdx = parIdx;
                     curIdx++;
                 }
-                DCHECK_LE(curIdx, TreeWidth);
-                DCHECK_LT(lastParIdx, TreeWidth);
-                DCHECK_LT(lastChildIdx, TreeWidth);
+                DCHECK_LE(curIdx, TreeWidth());
+                DCHECK_LT(lastParIdx, TreeWidth());
+                DCHECK_LT(lastChildIdx, TreeWidth());
                 for (int i = 0; i < TreeWidth(); ++i) {
                     parent->setChild(i, newChildren[i]);
                 }
@@ -2815,7 +2811,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             proposedBuckets[0] = new BVHSplitBucket();
             proposedBuckets[0]->count = bvhPrimitives.size();
             proposedBuckets[0]->bounds = bounds;
-            splitPoints[1] = bvhPrimitives.size();
+            splitPoints[8] = splitPoints[1] = bvhPrimitives.size();
             // do 7 binary splits
             for (int i = 0; i < 7; i++) {
                 // Consider leaf only for whole newNode
@@ -2828,12 +2824,12 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                     Float curCost =
                         childCost(j - 1, 7, (ICostCalcable **)proposedBuckets);
                     if (curCost > highestCost) {
-                        curCost = highestCost;
+                        highestCost = curCost;
                         bestSplit = j;
                     }
                 }
                 // move splits after current one back to make space
-                for (int j = 6; j > bestSplit; --j) {
+                for (int j = 6; j >= bestSplit; --j) {
                     proposedBuckets[j] = proposedBuckets[j - 1];
                     axis[j] = axis[j - 1];
                     splitPoints[j + 1] = splitPoints[j];
@@ -2923,13 +2919,13 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 // Translate local split into offsets in complete bvhPrims
                 splitPoints[bestSplit] = splitPoints[bestSplit - 1] + mid;
                 axis[bestSplit - 1] = dim;
-                proposedBuckets[bestSplit] = new BVHSplitBucket();
-                proposedBuckets[bestSplit]->count = bucketsBelow[minCostBucket].count;
-                proposedBuckets[bestSplit]->bounds = bucketsBelow[minCostBucket].bounds;
+                proposedBuckets[bestSplit-1] = new BVHSplitBucket();
+                proposedBuckets[bestSplit-1]->count = bucketsBelow[minCostBucket].count;
+                proposedBuckets[bestSplit-1]->bounds = bucketsBelow[minCostBucket].bounds;
                 // Can reuse old bucket here
-                proposedBuckets[bestSplit + 1]->count = bucketsAbove[minCostBucket].count;
-                proposedBuckets[bestSplit + 1]->bounds =
-                    bucketsAbove[minCostBucket].bounds;
+                proposedBuckets[bestSplit] = new BVHSplitBucket();
+                proposedBuckets[bestSplit]->count = bucketsAbove[minCostBucket].count;
+                proposedBuckets[bestSplit]->bounds = bucketsAbove[minCostBucket].bounds;
             }
             break;
         }
@@ -3006,19 +3002,20 @@ int EightWideBVHAggregate::flattenBVH(EightWideBVHBuildNode *node, int *offset) 
 }
 int EightWideBVHAggregate::traversalIdx(int dirIsNeg[3],
                                         const SIMDEightWideLinearBVHNode *node, int idx) {
-    int res = 0;
-    // 0,1,2, 3, 4,5,6
-    bool bit0 = idx & 1;
-    bool bit1 = (idx >> 1) & 1;
-    bool bit2 = (idx >> 2) & 1;
-    res += (idx & 4) ^ (dirIsNeg[node->Axis3()]);
-    res += (idx & 2) ^
-           ((dirIsNeg[node->Axis1()] & !bit2) | (dirIsNeg[node->Axis5()] & bit2));
-    res +=
-        (idx & 1) ^
-            (((dirIsNeg[node->Axis0()] & !bit1) | (dirIsNeg[node->Axis2()] & bit1)) &
-             !bit2) |
-        (((dirIsNeg[node->Axis4()] & !bit1) | (dirIsNeg[node->Axis6()] & bit1)) & bit2);
+    int res = 0;  
+    res |= ((idx & 4) ^ (dirIsNeg[node->Axis3()] << 2));
+    int bit2 = (res >> 2) & 1;
+    res |= ((idx & 2) ^
+           (((dirIsNeg[node->Axis1()] & (1-bit2)) | (dirIsNeg[node->Axis5()] & bit2))<<1));
+    int bit1 = (res >> 1) & 1;
+    res |=
+        ((idx & 1) ^
+            ((((dirIsNeg[node->Axis0()] & (1-bit1)) | (dirIsNeg[node->Axis2()] & bit1)) &
+             (1-bit2)) |
+        (((dirIsNeg[node->Axis4()] & (1-bit1)) | (dirIsNeg[node->Axis6()] & bit1)) & bit2)));
+    //res += idx & 4;
+    CHECK_GE(res, 0);
+    CHECK_LE(res, 7);
     return res;
 }
 #pragma endregion
