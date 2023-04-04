@@ -30,7 +30,7 @@ STAT_PERCENT("BVH/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_PIXEL_COUNTER("BVH/Nodes visited", bvhNodesVisited);
 STAT_PIXEL_RATIO("BVH/Interior Nodes hit", bvhInteriorHit, bvhInteriorTested);
 STAT_PIXEL_RATIO("BVH/Leaf Nodes hit", bvhLeavesHit, bvhLeavesTested)
-STAT_INT_DISTRIBUTION("BVH/AVg Leaf size hit", bvhAvgLeaveSizeHit);
+STAT_INT_DISTRIBUTION("BVH/Avg Leaf size hit", bvhAvgLeaveSizeHit);
 STAT_PIXEL_COUNTER("BVH/Primitive intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
@@ -157,8 +157,6 @@ struct WideBVHBuildNode : ICostCalcable {
     bool IsLeaf() const {
         return nPrimitives > 0;
     }
-
-  public:
     virtual WideBVHBuildNode *getChild(int idx) const = 0;
     virtual int getAxis(int idx) const = 0;
     virtual void setChild(int idx, WideBVHBuildNode *child) = 0;
@@ -211,10 +209,10 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
     WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
     int getAxis(int idx) const override { return splitAxis[idx]; }
     void setAxis(int idx, int axis) override { splitAxis[idx] = axis; }
-    void setChild(int idx, WideBVHBuildNode *child) {
+    void setChild(int idx, WideBVHBuildNode *child) override {
         children[idx] = (FourWideBVHBuildNode *)child;
     }
-    int PrimCount() const {
+    int PrimCount() const override {
         if (nPrimitives > 0) {
             return nPrimitives;
         } else {
@@ -230,6 +228,8 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
 };
 // Wide BVHBuildNote defintion with 8 newChildren
 struct EightWideBVHBuildNode : WideBVHBuildNode {
+    EightWideBVHBuildNode *children[8];
+    int splitAxis[7];
     void InitLeaf(int first, int n, const Bounds3f &b) {
         firstPrimOffset = first;
         nPrimitives = n;
@@ -258,8 +258,6 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
             ++interiorNodes;
         }
     }
-    Bounds3f bounds;
-    EightWideBVHBuildNode *children[8];
     int numChildren() const override {
         int count = 0;
         for (int i = 0; i < 8; ++i) {
@@ -268,15 +266,15 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
         }
         return count;
     };
-    int splitAxis[7];
+
     WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
-    void setChild(int idx, WideBVHBuildNode *child) {
+    void setChild(int idx, WideBVHBuildNode *child) override {
         children[idx] = (EightWideBVHBuildNode *)child;
     }
     int getAxis(int idx) const override { return splitAxis[idx]; }
     void setAxis(int idx, int axis) override { splitAxis[idx] = axis; }
 
-    int PrimCount() const {
+    int PrimCount() const override {
         if (nPrimitives > 0) {
             return nPrimitives;
         } else {

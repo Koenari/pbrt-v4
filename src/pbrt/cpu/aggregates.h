@@ -34,7 +34,6 @@ struct SIMDEightWideLinearBVHNode;
 struct MortonPrimitive;
 
 struct ICostCalcable {
-  public:
     virtual Bounds3f Bounds() const = 0;
     virtual int PrimCount() const = 0;
 };
