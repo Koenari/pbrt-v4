@@ -849,8 +849,8 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 --*totalNodes;
                 opmiziationDone = true;
                 parent->setChild(mergedChildIdx, NULL);
-                WideBVHBuildNode *newChildren[4]{NULL};
-                int newAxis[4]{0};
+                WideBVHBuildNode *newChildren[MaxTreeWidth]{NULL};
+                int newAxis[MaxTreeWidth-1]{0};
                 int lastParIdx = -1;
                 int curIdx = 0;
                 for (int parIdx = 0; parIdx < mergedChildIdx; ++parIdx) {
@@ -978,14 +978,14 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                         continue;
                     if (child1->numChildren() + child2->numChildren() <= TreeWidth()) {
                         ICostCalcable *oldNodes[MaxTreeWidth];
-                        for (int k = 0; k < 4; k++) {
+                        for (int k = 0; k < TreeWidth(); k++) {
                             oldNodes[k] = parent->getChild(k);
                         }
                         BVHSplitBucket newNode;
                         newNode.bounds = Union(child1->bounds, child2->bounds);
                         newNode.count = 0;
                         ICostCalcable *newNodes[MaxTreeWidth];
-                        for (int k = 0; k < 4; k++) {
+                        for (int k = 0; k < TreeWidth(); k++) {
                             if (k == j) {
                                 newNodes[k] = NULL;
                             } else if (k == i) {
@@ -1016,8 +1016,8 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             int planeBetweenChildren = parent->getAxis(relevantAxisIdx(bestI, bestJ));
             auto child1 = parent->getChild(bestI);
             auto child2 = parent->getChild(bestJ);
-            WideBVHBuildNode *newChildren[4]{NULL};
-            int newAxis[4]{0};
+            WideBVHBuildNode *newChildren[MaxTreeWidth]{NULL};
+            int newAxis[MaxTreeWidth-1]{0};
             int lastIdx = -1;
             int curIdx = 0;
             int j = 0;
