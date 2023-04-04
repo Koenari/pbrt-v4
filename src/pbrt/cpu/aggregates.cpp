@@ -2345,7 +2345,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                 } while (complexSplit && minCostRow != dim1ProposedSplit);
 
                 // Can free resources here
-                // Compute leaf cost and SAH split cost for chosen split
+                // Compute leaf cost and split cost for chosen split
                 minCost = RelativeInnerCost + minCost;
                 if (leafCost(bvhPrimitives.size()) <= minCost &&
                     bvhPrimitives.size() <= maxPrimsInNode) {
@@ -2795,14 +2795,319 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
         CHECK(splitMethod == EPO || splitMethod == SAH);
         // Aditioanlly we only use parts of the splitvariants
         CHECK(splitVariant == 0 || splitVariant == 2);
-        // Cut in 4
-        // create
+        // Cut in 8
+        constexpr int nBuckets = 12;
+        constexpr int nSplits = nBuckets - 1;
         size_t splitPoints[9]{};
         splitPoints[0] = 0;
         switch (splitVariant) {
         case 2:
         case 3: {
-        } break;
+            int dims = centroidBounds.MaxDimensions();
+            int dim1 = axis[3] = (dims >> 0) & 3;
+            int dim2 = axis[1] = axis[5] = (dims >> 2) & 3;
+            int dim3 = axis[0] = axis[2] = axis[4] = axis[6] = (dims >> 4) & 3;
+            int count1 = 0;
+            BVHSplitBucket buckets[nBuckets][nBuckets][nBuckets];
+            for (const auto &prim : bvhPrimitives) {
+                int b1 = nBuckets * centroidBounds.Offset(prim.Centroid())[dim1];
+                if (b1 == nBuckets)
+                    b1 = nBuckets - 1;
+                int b2 = nBuckets * centroidBounds.Offset(prim.Centroid())[dim2];
+                if (b2 == nBuckets)
+                    b2 = nBuckets - 1;
+                int b3 = nBuckets * centroidBounds.Offset(prim.Centroid())[dim3];
+                if (b3 == nBuckets)
+                    b3 = nBuckets - 1;
+                CHECK_GE(b1, 0);
+                CHECK_LT(b1, nBuckets);
+                CHECK_GE(b2, 0);
+                CHECK_LT(b2, nBuckets);
+                CHECK_GE(b3, 0);
+                CHECK_LT(b3, nBuckets);
+                buckets[b1][b2][b3].count++;
+                buckets[b1][b2][b3].bounds =
+                    Union(buckets[b1][b2][b3].bounds, prim.bounds);
+                count1++;
+            }
+            // Collapse on dim1
+            auto bucketsA = std::vector(
+                nSplits, std::vector(nBuckets, std::vector<BVHSplitBucket>(nBuckets)));
+            auto bucketsB = std::vector(
+                nSplits, std::vector(nBuckets, std::vector<BVHSplitBucket>(nBuckets)));
+            for (size_t idx2 = 0; idx2 < nBuckets; idx2++) {
+                for (size_t idx3 = 0; idx3 < nBuckets; idx3++) {
+                    // Above collapse
+                    bucketsA[0][idx2][idx3].bounds = buckets[0][idx2][idx3].bounds;
+                    bucketsA[0][idx2][idx3].count = buckets[0][idx2][idx3].count;
+                    for (size_t idx1 = 1; idx1 < nSplits; idx1++) {
+                        bucketsA[idx1][idx2][idx3].bounds =
+                            Union(bucketsA[idx1 - 1][idx2][idx3].bounds,
+                                  buckets[idx1][idx2][idx3].bounds);
+                        bucketsA[idx1][idx2][idx3].count =
+                            bucketsA[idx1 - 1][idx2][idx3].count +
+                            buckets[idx1][idx2][idx3].count;
+                    }
+                    // Below collapse
+                    bucketsB[nSplits - 1][idx2][idx3].bounds =
+                        buckets[nSplits][idx2][idx3].bounds;
+                    bucketsB[nSplits - 1][idx2][idx3].count =
+                        buckets[nSplits][idx2][idx3].count;
+                    for (size_t idx1 = nSplits - 1; idx1 > 0; --idx1) {
+                        bucketsB[idx1 - 1][idx2][idx3].bounds =
+                            Union(bucketsB[idx1][idx2][idx3].bounds,
+                                  buckets[idx1][idx2][idx3].bounds);
+                        bucketsB[idx1 - 1][idx2][idx3].count =
+                            bucketsB[idx1][idx2][idx3].count +
+                            buckets[idx1][idx2][idx3].count;
+                    }
+                }
+            }
+
+            // Collapse on dim2
+            auto bucketsAA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets)));
+            auto bucketsAB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets)));
+            auto bucketsBA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets)));
+            auto bucketsBB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nBuckets)));
+            for (size_t idx1 = 0; idx1 < nSplits; idx1++) {
+                for (size_t idx3 = 0; idx3 < nBuckets; idx3++) {
+                    // forward collapses
+                    bucketsAA[idx1][0][idx3].bounds = bucketsA[idx1][0][idx3].bounds;
+                    bucketsAA[idx1][0][idx3].count = bucketsA[idx1][0][idx3].count;
+
+                    bucketsBA[idx1][0][idx3].bounds = bucketsB[idx1][0][idx3].bounds;
+                    bucketsBA[idx1][0][idx3].count = bucketsB[idx1][0][idx3].count;
+                    for (size_t idx2 = 1; idx2 < nSplits; idx2++) {
+                        bucketsAA[idx1][idx2][idx3].bounds =
+                            Union(bucketsAA[idx1][idx2 - 1][idx3].bounds,
+                                  bucketsA[idx1][idx2][idx3].bounds);
+                        bucketsAA[idx1][idx2][idx3].count =
+                            bucketsAA[idx1][idx2 - 1][idx3].count +
+                            bucketsA[idx1][idx2][idx3].count;
+
+                        bucketsBA[idx1][idx2][idx3].bounds =
+                            Union(bucketsBA[idx1][idx2 - 1][idx3].bounds,
+                                  bucketsB[idx1][idx2][idx3].bounds);
+                        bucketsBA[idx1][idx2][idx3].count =
+                            bucketsBA[idx1][idx2 - 1][idx3].count +
+                            bucketsB[idx1][idx2][idx3].count;
+                    }
+                    // backward collapses
+                    bucketsAB[idx1][nSplits - 1][idx3].bounds =
+                        bucketsA[idx1][nSplits][idx3].bounds;
+                    bucketsAB[idx1][nSplits - 1][idx3].count =
+                        bucketsA[idx1][nSplits][idx3].count;
+
+                    bucketsBB[idx1][nSplits - 1][idx3].bounds =
+                        bucketsB[idx1][nSplits][idx3].bounds;
+                    bucketsBB[idx1][nSplits - 1][idx3].count =
+                        bucketsB[idx1][nSplits][idx3].count;
+                    for (size_t idx2 = nSplits - 1; idx2 > 0; --idx2) {
+                        bucketsAB[idx1][idx2 - 1][idx3].bounds =
+                            Union(bucketsAB[idx1][idx2][idx3].bounds,
+                                  bucketsA[idx1][idx2][idx3].bounds);
+                        bucketsAB[idx1][idx2 - 1][idx3].count =
+                            bucketsAB[idx1][idx2][idx3].count +
+                            bucketsA[idx1][idx2][idx3].count;
+
+                        bucketsBB[idx1][idx2 - 1][idx3].bounds =
+                            Union(bucketsBB[idx1][idx2][idx3].bounds,
+                                  bucketsB[idx1][idx2][idx3].bounds);
+                        bucketsBB[idx1][idx2 - 1][idx3].count =
+                            bucketsBB[idx1][idx2][idx3].count +
+                            bucketsB[idx1][idx2][idx3].count;
+                    }
+                }
+            }
+            // Collapse on dim3
+            // Creates final canidates
+            auto bucketsAAA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsABA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsBAA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsBBA = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsAAB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsABB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsBAB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            auto bucketsBBB = std::vector(
+                nSplits, std::vector(nSplits, std::vector<BVHSplitBucket>(nSplits)));
+            for (size_t idx1 = 0; idx1 < nSplits; idx1++) {
+                for (size_t idx2 = 0; idx2 < nSplits; idx2++) {
+                    // forward collapses
+                    bucketsAAA[idx1][idx2][0].bounds = bucketsAA[idx1][idx2][0].bounds;
+                    bucketsAAA[idx1][idx2][0].count = bucketsAA[idx1][idx2][0].count;
+                    bucketsABA[idx1][idx2][0].bounds = bucketsAB[idx1][idx2][0].bounds;
+                    bucketsABA[idx1][idx2][0].count = bucketsAB[idx1][idx2][0].count;
+                    bucketsBAA[idx1][idx2][0].bounds = bucketsBA[idx1][idx2][0].bounds;
+                    bucketsBAA[idx1][idx2][0].count = bucketsBA[idx1][idx2][0].count;
+                    bucketsBBA[idx1][idx2][0].bounds = bucketsBB[idx1][idx2][0].bounds;
+                    bucketsBBA[idx1][idx2][0].count = bucketsBB[idx1][idx2][0].count;
+                    for (size_t idx3 = 1; idx3 < nSplits; idx3++) {
+                        bucketsAAA[idx1][idx2][idx3].bounds =
+                            Union(bucketsAAA[idx1][idx2][idx3 - 1].bounds,
+                                  bucketsAA[idx1][idx2][idx3].bounds);
+                        bucketsAAA[idx1][idx2][idx3].count =
+                            bucketsAAA[idx1][idx2][idx3 - 1].count +
+                            bucketsAA[idx1][idx2][idx3].count;
+
+                        bucketsABA[idx1][idx2][idx3].bounds =
+                            Union(bucketsABA[idx1][idx2][idx3 - 1].bounds,
+                                  bucketsAB[idx1][idx2][idx3].bounds);
+                        bucketsABA[idx1][idx2][idx3].count =
+                            bucketsABA[idx1][idx2][idx3 - 1].count +
+                            bucketsAB[idx1][idx2][idx3].count;
+
+                        bucketsBAA[idx1][idx2][idx3].bounds =
+                            Union(bucketsBAA[idx1][idx2][idx3 - 1].bounds,
+                                  bucketsBA[idx1][idx2][idx3].bounds);
+                        bucketsBAA[idx1][idx2][idx3].count =
+                            bucketsBAA[idx1][idx2][idx3 - 1].count +
+                            bucketsBA[idx1][idx2][idx3].count;
+
+                        bucketsBBA[idx1][idx2][idx3].bounds =
+                            Union(bucketsBBA[idx1][idx2][idx3 - 1].bounds,
+                                  bucketsBB[idx1][idx2][idx3].bounds);
+                        bucketsBBA[idx1][idx2][idx3].count =
+                            bucketsBBA[idx1][idx2][idx3 - 1].count +
+                            bucketsBB[idx1][idx2][idx3].count;
+                    }
+                    // backward collapses
+                    bucketsAAB[idx1][idx2][nSplits - 1].bounds =
+                        bucketsAA[idx1][idx2][nSplits].bounds;
+                    bucketsAAB[idx1][idx2][nSplits - 1].count =
+                        bucketsAA[idx1][idx2][nSplits].count;
+
+                    bucketsABB[idx1][idx2][nSplits - 1].bounds =
+                        bucketsAB[idx1][idx2][nSplits].bounds;
+                    bucketsABB[idx1][idx2][nSplits - 1].count =
+                        bucketsAB[idx1][idx2][nSplits].count;
+
+                    bucketsBAB[idx1][idx2][nSplits - 1].bounds =
+                        bucketsBA[idx1][idx2][nSplits].bounds;
+                    bucketsBAB[idx1][idx2][nSplits - 1].count =
+                        bucketsBA[idx1][idx2][nSplits].count;
+
+                    bucketsBBB[idx1][idx2][nSplits - 1].bounds =
+                        bucketsBB[idx1][idx2][nSplits].bounds;
+                    bucketsBBB[idx1][idx2][nSplits - 1].count =
+                        bucketsBB[idx1][idx2][nSplits].count;
+                    for (size_t idx3 = nSplits - 1; idx3 > 0; --idx3) {
+                        bucketsAAB[idx1][idx2][idx3 - 1].bounds =
+                            Union(bucketsAAB[idx1][idx2][idx3].bounds,
+                                  bucketsAA[idx1][idx2][idx3].bounds);
+                        bucketsAAB[idx1][idx2][idx3 - 1].count =
+                            bucketsAAB[idx1][idx2][idx3].count +
+                            bucketsAA[idx1][idx2][idx3].count;
+
+                        bucketsABB[idx1][idx2][idx3 - 1].bounds =
+                            Union(bucketsABB[idx1][idx2][idx3].bounds,
+                                  bucketsAB[idx1][idx2][idx3].bounds);
+                        bucketsABB[idx1][idx2][idx3 - 1].count =
+                            bucketsABB[idx1][idx2][idx3].count +
+                            bucketsAB[idx1][idx2][idx3].count;
+
+                        bucketsBAB[idx1][idx2][idx3 - 1].bounds =
+                            Union(bucketsBAB[idx1][idx2][idx3].bounds,
+                                  bucketsBA[idx1][idx2][idx3].bounds);
+                        bucketsBAB[idx1][idx2][idx3 - 1].count =
+                            bucketsBAB[idx1][idx2][idx3].count +
+                            bucketsBA[idx1][idx2][idx3].count;
+
+                        bucketsBBB[idx1][idx2][idx3 - 1].bounds =
+                            Union(bucketsBBB[idx1][idx2][idx3].bounds,
+                                  bucketsBB[idx1][idx2][idx3].bounds);
+                        bucketsBBB[idx1][idx2][idx3 - 1].count =
+                            bucketsBBB[idx1][idx2][idx3].count +
+                            bucketsBB[idx1][idx2][idx3].count;
+                    }
+                }
+            }
+            // Compute cost for all possible splits and select best
+            ICostCalcable *curBuckets[8];
+            Float minCost = Infinity;
+            int minCostIdx1 = -1;
+            int minCostIdx2 = -1;
+            int minCostIdx3 = -1;
+            for (size_t idx1 = 0; idx1 < nSplits; ++idx1) {
+                for (size_t idx2 = 0; idx2 < nSplits; ++idx2) {
+                    for (size_t idx3 = 0; idx3 < nSplits; ++idx3) {
+                        // Compute cost for candidate split and update minimum if
+                        // necessary
+                        curBuckets[0] = &bucketsAAA[idx1][idx2][idx3];
+                        curBuckets[1] = &bucketsAAB[idx1][idx2][idx3];
+                        curBuckets[2] = &bucketsABA[idx1][idx2][idx3];
+                        curBuckets[3] = &bucketsABB[idx1][idx2][idx3];
+                        curBuckets[4] = &bucketsBAA[idx1][idx2][idx3];
+                        curBuckets[5] = &bucketsBAB[idx1][idx2][idx3];
+                        curBuckets[6] = &bucketsBBA[idx1][idx2][idx3];
+                        curBuckets[7] = &bucketsBBB[idx1][idx2][idx3];
+
+                        CHECK_EQ(
+                            bvhPrimitives.size(),
+                            curBuckets[0]->PrimCount() + curBuckets[1]->PrimCount() +
+                                curBuckets[2]->PrimCount() + curBuckets[3]->PrimCount() +
+                                curBuckets[4]->PrimCount() + curBuckets[5]->PrimCount() +
+                                curBuckets[6]->PrimCount() + curBuckets[7]->PrimCount());
+
+                        Float cost = splitCost(8, curBuckets);
+                        DCHECK_GT(cost, 0);
+                        if (cost < minCost) {
+                            minCost = cost;
+                            minCostIdx1 = idx1;
+                            minCostIdx2 = idx2;
+                            minCostIdx3 = idx3;
+                        }
+                    }
+                }
+            }
+            // Sort prims and populate splipoints
+            //   Can free resources here
+            //   Compute leaf cost and split cost for chosen split
+            minCost = RelativeInnerCost + minCost;
+
+            if (leafCost(bvhPrimitives.size()) <= minCost &&
+                bvhPrimitives.size() <= maxPrimsInNode) {
+                int firstPrimOffset = orderedPrimsOffset->fetch_add(bvhPrimitives.size());
+                for (size_t i = 0; i < bvhPrimitives.size(); ++i) {
+                    int index = bvhPrimitives[i].primitiveIndex;
+                    orderedPrims[firstPrimOffset + i] = primitives[index];
+                }
+                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+                return node;
+            }
+            BVHPrimitive *iters[7];
+            auto primPart = [=](BVHPrimitive *start, BVHPrimitive *end, int dim,
+                                int splitIdx) {
+                return std::partition(start, end, [=](const BVHPrimitive &bp) {
+                    int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim];
+                    if (b == nBuckets)
+                        b = nBuckets - 1;
+                    return b <= splitIdx;
+                });
+            };
+            iters[3] =
+                primPart(bvhPrimitives.begin(), bvhPrimitives.end(), dim1, minCostIdx1);
+            iters[1] = primPart(bvhPrimitives.begin(), iters[3], dim2, minCostIdx2);
+            iters[5] = primPart(iters[3], bvhPrimitives.end(), dim2, minCostIdx2);
+            
+            iters[0] = primPart(bvhPrimitives.begin(), iters[1], dim3, minCostIdx3);
+            iters[2] = primPart(iters[1], iters[3], dim3, minCostIdx3);
+            iters[4] = primPart(iters[3], iters[5], dim3, minCostIdx3);
+            iters[6] = primPart(iters[5], bvhPrimitives.end(), dim3, minCostIdx3);
+            for (int i = 0; i < 7;++i)
+                splitPoints[i+1] = iters[i] - bvhPrimitives.begin();
+            break;
+        } 
         case 0:
         default:
             BVHSplitBucket *proposedBuckets[8]{NULL};
@@ -2813,7 +3118,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             // do 7 binary splits
             for (int i = 0; i < 7; i++) {
                 // Consider leaf only for whole newNode
-                bool leafAllowed = i == 0;
+                bool firstIteration = i == 0;
                 int mid;
                 Float highestCost = 0;
                 int bestSplit = 1;
@@ -2837,8 +3142,12 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 pstd::span<BVHPrimitive> currentPrimitives =
                     bvhPrimitives.subspan(splitPoints[bestSplit - 1], count);
                 Bounds3f curCentroidBounds;
-                for (const auto &prim : currentPrimitives)
-                    curCentroidBounds = Union(curCentroidBounds, prim.Centroid());
+                if (firstIteration) {
+                    curCentroidBounds = centroidBounds;
+                } else {
+                    for (const auto &prim : currentPrimitives)
+                        curCentroidBounds = Union(curCentroidBounds, prim.Centroid());
+                }
                 int dim = curCentroidBounds.MaxDimension();
                 // Compute Splits on local subset
                 //  Allocate _BVHSplitBucket_ for SAH partition buckets
@@ -2891,7 +3200,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                     }
                 }
                 // Consider leaf only for first iteration
-                if (leafAllowed && currentPrimitives.size() <= maxPrimsInNode) {
+                if (firstIteration && currentPrimitives.size() <= maxPrimsInNode) {
                     // Compute leaf cost and SAH split cost for chosen
                     minCost = RelativeInnerCost + minCost;
                     if (leafCost(count) <= minCost) {
