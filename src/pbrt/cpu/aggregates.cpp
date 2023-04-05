@@ -579,7 +579,7 @@ Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prim
     Primitive accel = nullptr;
     if (name == "bvh" || name == "widebvh4")
         accel = FourWideBVHAggregate::Create(std::move(prims), parameters);
-    if (name == "widebvh8")
+    else if (name == "widebvh8")
         accel = EightWideBVHAggregate::Create(std::move(prims), parameters);
     else if (name == "binbvh")
         accel = BinBVHAggregate::Create(std::move(prims), parameters);
@@ -952,7 +952,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 if (costReduction > 0) {
                     LOG_VERBOSE("Merged two leaves");
                     opmtimizationDone = true;
-                    child1->nPrimitives = child1->nPrimitives + child2->nPrimitives;
+                    child1->nPrimitives = newLeaf.count;
+                    child1->bounds = newLeaf.bounds;
+                    parent->setChild(i,child1);
                     parent->setChild(j, NULL);
                     emptyNodes++;
                     totalLeafNodes--;
@@ -3155,7 +3157,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 BVHSplitBucket buckets[nBuckets];
                 // Initialize _BVHSplitBucket_ for SAH partition buckets
                 for (const auto &prim : currentPrimitives) {
-                    int b = nBuckets * centroidBounds.Offset(prim.Centroid())[dim];
+                    int b = nBuckets * curCentroidBounds.Offset(prim.Centroid())[dim];
                     if (b == nBuckets)
                         b = nBuckets - 1;
                     DCHECK_GE(b, 0);
@@ -3216,7 +3218,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 auto midIter = std::partition(
                     currentPrimitives.begin(), currentPrimitives.end(),
                     [=](const BVHPrimitive &bp) {
-                        int b = nBuckets * centroidBounds.Offset(bp.Centroid())[dim];
+                        int b = nBuckets * curCentroidBounds.Offset(bp.Centroid())[dim];
                         if (b == nBuckets)
                             b = nBuckets - 1;
                         return b <= minCostBucket;
@@ -3226,9 +3228,10 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 // Translate local split into offsets in complete bvhPrims
                 splitPoints[bestSplit] = splitPoints[bestSplit - 1] + mid;
                 axis[bestSplit - 1] = dim;
-                proposedBuckets[bestSplit-1] = new BVHSplitBucket();
-                proposedBuckets[bestSplit-1]->count = bucketsBelow[minCostBucket].count;
-                proposedBuckets[bestSplit-1]->bounds = bucketsBelow[minCostBucket].bounds;
+                proposedBuckets[bestSplit - 1] = new BVHSplitBucket();
+                proposedBuckets[bestSplit - 1]->count = bucketsBelow[minCostBucket].count;
+                proposedBuckets[bestSplit - 1]->bounds =
+                    bucketsBelow[minCostBucket].bounds;
                 // Can reuse old bucket here
                 proposedBuckets[bestSplit] = new BVHSplitBucket();
                 proposedBuckets[bestSplit]->count = bucketsAbove[minCostBucket].count;

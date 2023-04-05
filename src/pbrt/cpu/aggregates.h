@@ -70,7 +70,8 @@ class BVHAggregate {
     virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;
 
     protected:
-    BVHAggregate(int maxPrimsInNode,std::vector<Primitive> p, SplitMethod splitMethod, Float epoRatio);
+    BVHAggregate(int maxPrimsInNode, std::vector<Primitive> p, SplitMethod splitMethod,
+                 Float epoRatio);
     int maxPrimsInNode;
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
