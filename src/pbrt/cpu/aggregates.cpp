@@ -357,9 +357,9 @@ BVHAggregate::BVHAggregate(int maxPrimsInNode, std::vector<Primitive> prims,
       primitives(prims),
       splitMethod(sm),
       epoRatio(epoRatio) {}
-WideBVHAggregate::WideBVHAggregate(int maxPrimsInNode, std::vector<Primitive> prims,
+WideBVHAggregate::WideBVHAggregate(int TreeWidth, int maxPrimsInNode, std::vector<Primitive> prims,
                                    SplitMethod sm, Float epoRatio)
-    : BVHAggregate(maxPrimsInNode, prims, sm, epoRatio) {}
+    : BVHAggregate(maxPrimsInNode, prims, sm, epoRatio), TreeWidth(TreeWidth) {}
 BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
                                  SplitMethod splitMethod, Float epoRatio,
                                  bool skipCreation)
@@ -417,7 +417,7 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
                                            Float epoRatio, int splitVariant,
                                            CreationMethod method,
                                            OptimizationStrategy opti)
-    : WideBVHAggregate(std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
+    : WideBVHAggregate(4,std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
                        epoRatio) {
     CHECK(!primitives.empty());
     LOG_VERBOSE("Creating WideBVHAggregate: SPlitmethod %d (%d) - %s - %s",
@@ -495,7 +495,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
                                              Float epoRatio, int splitVariant,
                                              CreationMethod method,
                                              OptimizationStrategy opti)
-    : WideBVHAggregate(std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
+    : WideBVHAggregate(8,std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
                        epoRatio) {
     CHECK(!primitives.empty());
     LOG_VERBOSE("Creating WideBVHAggregate: SPlitmethod %d (%d) - %s - %s",
@@ -820,14 +820,14 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
     } else {
         bvhIntNodeDepth << depth;
         ICostCalcable *nodes[MaxTreeWidth]{};
-        for (int i = 0; i < TreeWidth(); i++) {
+        for (int i = 0; i < TreeWidth; i++) {
             nodes[i] = root->getChild(i);
         }
         Float cost = RelativeInnerCost;
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             if (!(root->getChild(i)))
                 continue;
-            cost += penalizedHitProbability(i, TreeWidth(), nodes) *
+            cost += penalizedHitProbability(i, TreeWidth, nodes) *
                     calcMetrics(root->getChild(i), depth + 1);
         }
         return cost;
@@ -838,13 +838,13 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
     bool didOptimize = false;
     auto mergeChildIntoParent = [this, totalNodes](WideBVHBuildNode *parent) {
         bool opmiziationDone = false;
-        for (int mergedChildIdx = 0; mergedChildIdx < TreeWidth(); ++mergedChildIdx) {
+        for (int mergedChildIdx = 0; mergedChildIdx < TreeWidth; ++mergedChildIdx) {
             auto child = parent->getChild(mergedChildIdx);
             if (child == NULL || child->IsLeaf())
                 continue;
-            if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth()) {
+            if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth) {
                 LOG_VERBOSE("Merged child into parent");
-                emptyNodes -= (TreeWidth() - 1);
+                emptyNodes -= (TreeWidth - 1);
                 --interiorNodes;
                 --*totalNodes;
                 opmiziationDone = true;
@@ -857,7 +857,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     if (!parent->getChild(parIdx))
                         continue;
                     DCHECK_GE(parent->getChild(parIdx)->nPrimitives, -1);
-                    DCHECK_LT(curIdx, TreeWidth());
+                    DCHECK_LT(curIdx, TreeWidth);
                     newChildren[curIdx] = parent->getChild(parIdx);
                     if (lastParIdx >= 0) {
                         newAxis[curIdx - 1] =
@@ -870,11 +870,11 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     newAxis[curIdx - 1] =
                         parent->getAxis(relevantAxisIdx(lastParIdx, mergedChildIdx));
                 int lastChildIdx = -1;
-                for (int childIdx = 0; childIdx < TreeWidth(); ++childIdx) {
+                for (int childIdx = 0; childIdx < TreeWidth; ++childIdx) {
                     if (!child->getChild(childIdx))
                         continue;
                     DCHECK_GE(child->getChild(childIdx)->nPrimitives, -1);
-                    DCHECK_LT(curIdx, TreeWidth());
+                    DCHECK_LT(curIdx, TreeWidth);
                     newChildren[curIdx] = child->getChild(childIdx);
                     if (lastChildIdx >= 0) {
                         newAxis[curIdx - 1] =
@@ -884,11 +884,11 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     curIdx++;
                 }
                 lastParIdx = mergedChildIdx;
-                for (int parIdx = mergedChildIdx + 1; parIdx < TreeWidth(); ++parIdx) {
+                for (int parIdx = mergedChildIdx + 1; parIdx < TreeWidth; ++parIdx) {
                     if (!parent->getChild(parIdx))
                         continue;
                     DCHECK_GE(parent->getChild(parIdx)->nPrimitives, -1);
-                    DCHECK_LT(curIdx, TreeWidth());
+                    DCHECK_LT(curIdx, TreeWidth);
                     newChildren[curIdx] = parent->getChild(parIdx);
                     if (lastParIdx >= 0) {
                         newAxis[curIdx - 1] =
@@ -897,13 +897,13 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     lastParIdx = parIdx;
                     curIdx++;
                 }
-                DCHECK_LE(curIdx, TreeWidth());
-                DCHECK_LT(lastParIdx, TreeWidth());
-                DCHECK_LT(lastChildIdx, TreeWidth());
-                for (int i = 0; i < TreeWidth(); ++i) {
+                DCHECK_LE(curIdx, TreeWidth);
+                DCHECK_LT(lastParIdx, TreeWidth);
+                DCHECK_LT(lastChildIdx, TreeWidth);
+                for (int i = 0; i < TreeWidth; ++i) {
                     parent->setChild(i, newChildren[i]);
                 }
-                for (int i = 0; i < TreeWidth() - 1; ++i) {
+                for (int i = 0; i < TreeWidth - 1; ++i) {
                     parent->setAxis(i, newAxis[i]);
                 }
                 mergedChildIdx = -1;
@@ -915,11 +915,11 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
     auto mergeLeafChildren = [this](WideBVHBuildNode *parent) {
         bool opmtimizationDone = false;
         // See if any merges are benficial
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             auto child1 = parent->getChild(i);
             if (child1 == NULL || !child1->IsLeaf())
                 continue;
-            for (int j = i + 1; j < TreeWidth(); ++j) {
+            for (int j = i + 1; j < TreeWidth; ++j) {
                 auto child2 = parent->getChild(j);
                 if (child2 == NULL || !child2->IsLeaf())
                     continue;
@@ -929,14 +929,14 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     continue;
                 // Bounds3f newBounds = Union(child1->bounds, child2->bounds);
                 ICostCalcable *oldNodes[MaxTreeWidth];
-                for (int k = 0; k < TreeWidth(); k++) {
+                for (int k = 0; k < TreeWidth; k++) {
                     oldNodes[k] = parent->getChild(k);
                 }
                 BVHSplitBucket newLeaf;
                 newLeaf.bounds = Union(child1->bounds, child2->bounds);
                 newLeaf.count = child1->nPrimitives + child2->nPrimitives;
                 ICostCalcable *newNodes[MaxTreeWidth];
-                for (int k = 0; k < TreeWidth(); k++) {
+                for (int k = 0; k < TreeWidth; k++) {
                     if (k == j) {
                         newNodes[k] = NULL;
                     } else if (k == i) {
@@ -945,9 +945,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                         newNodes[k] = oldNodes[k];
                     }
                 }
-                float oldCost1 = childCost(i, TreeWidth(), oldNodes);
-                float oldCost2 = childCost(j, TreeWidth(), oldNodes);
-                float newCost = childCost(i, TreeWidth(), newNodes);
+                float oldCost1 = childCost(i, TreeWidth, oldNodes);
+                float oldCost2 = childCost(j, TreeWidth, oldNodes);
+                float newCost = childCost(i, TreeWidth, newNodes);
                 float costReduction = (oldCost1 + oldCost2) - newCost;
                 if (costReduction > 0) {
                     LOG_VERBOSE("Merged two leaves");
@@ -968,24 +968,24 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
         while (true) {
             int bestI = -1, bestJ = -1;
             float maxReduction = -1;
-            for (int i = 0; i < TreeWidth(); ++i) {
+            for (int i = 0; i < TreeWidth; ++i) {
                 auto child1 = parent->getChild(i);
                 if (child1 == NULL || child1->nPrimitives > 0)
                     continue;
-                for (int j = i + 1; j < TreeWidth(); ++j) {
+                for (int j = i + 1; j < TreeWidth; ++j) {
                     auto child2 = parent->getChild(j);
                     if (child2 == NULL || child2->nPrimitives > 0)
                         continue;
-                    if (child1->numChildren() + child2->numChildren() <= TreeWidth()) {
+                    if (child1->numChildren() + child2->numChildren() <= TreeWidth) {
                         ICostCalcable *oldNodes[MaxTreeWidth];
-                        for (int k = 0; k < TreeWidth(); k++) {
+                        for (int k = 0; k < TreeWidth; k++) {
                             oldNodes[k] = parent->getChild(k);
                         }
                         BVHSplitBucket newNode;
                         newNode.bounds = Union(child1->bounds, child2->bounds);
                         newNode.count = 0;
                         ICostCalcable *newNodes[MaxTreeWidth];
-                        for (int k = 0; k < TreeWidth(); k++) {
+                        for (int k = 0; k < TreeWidth; k++) {
                             if (k == j) {
                                 newNodes[k] = NULL;
                             } else if (k == i) {
@@ -994,9 +994,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                                 newNodes[k] = oldNodes[k];
                             }
                         }
-                        Float oldCost1 = childCost(i, TreeWidth(), oldNodes);
-                        Float oldCost2 = childCost(j, TreeWidth(), oldNodes);
-                        Float newCost = childCost(i, TreeWidth(), newNodes);
+                        Float oldCost1 = childCost(i, TreeWidth, oldNodes);
+                        Float oldCost2 = childCost(j, TreeWidth, oldNodes);
+                        Float newCost = childCost(i, TreeWidth, newNodes);
                         float costReduction = (oldCost1 + oldCost2) - newCost;
                         if (costReduction > maxReduction) {
                             maxReduction = costReduction;
@@ -1012,7 +1012,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             opmtimizationDone = true;
             --*totalNodes;
             --interiorNodes;
-            emptyNodes -= (TreeWidth() - 1);
+            emptyNodes -= (TreeWidth - 1);
             int planeBetweenChildren = parent->getAxis(relevantAxisIdx(bestI, bestJ));
             auto child1 = parent->getChild(bestI);
             auto child2 = parent->getChild(bestJ);
@@ -1021,7 +1021,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             int lastIdx = -1;
             int curIdx = 0;
             int j = 0;
-            for (int i = 0; i < TreeWidth(); ++i) {
+            for (int i = 0; i < TreeWidth; ++i) {
                 if (!child1->getChild(i))
                     continue;
                 newChildren[curIdx] = child1->getChild(i);
@@ -1034,7 +1034,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             if (curIdx > 0)
                 newAxis[curIdx - 1] = planeBetweenChildren;
             lastIdx = -1;
-            for (int i = 0; i < TreeWidth(); ++i) {
+            for (int i = 0; i < TreeWidth; ++i) {
                 if (!child2->getChild(i))
                     continue;
                 newChildren[curIdx] = child2->getChild(i);
@@ -1045,10 +1045,10 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 curIdx++;
             }
             CHECK_EQ(curIdx, child1->numChildren() + child2->numChildren());
-            for (int i = 0; i < TreeWidth(); ++i) {
+            for (int i = 0; i < TreeWidth; ++i) {
                 parent->getChild(bestI)->setChild(i, newChildren[i]);
             }
-            for (int i = 0; i < TreeWidth() - 1; ++i) {
+            for (int i = 0; i < TreeWidth - 1; ++i) {
                 parent->getChild(bestI)->setAxis(i, newAxis[i]);
             }
             parent->getChild(bestI)->bounds = Union(child1->bounds, child2->bounds);
@@ -1068,7 +1068,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
         if (!didOptimizeThisRound && (strat & OptimizationStrategy::MergeInnerChildren))
             didOptimizeThisRound |= mergeInnerNodeChildren(root);
         if (!didOptimizeThisRound)
-            for (int i = 0; i < TreeWidth(); ++i)
+            for (int i = 0; i < TreeWidth; ++i)
                 if (root->getChild(i))
                     didOptimizeThisRound |=
                         optimizeTree(root->getChild(i), totalNodes, strat);
@@ -1671,7 +1671,7 @@ pstd::optional<ShapeIntersection> FourWideBVHAggregate::Intersect(const Ray &ray
         const uint8_t *idxArr =
             traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
                           [dirIsNeg[node->Axis2()]];
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             uint8_t idx = idxArr[i];
             if (node->offsets[idx] < 0)
                 continue;
@@ -1740,7 +1740,7 @@ bool FourWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
         const uint8_t *idxArr =
             traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
                           [dirIsNeg[node->Axis2()]];
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             uint8_t idx = idxArr[i];
             if (node->offsets[idx] < 0)
                 continue;
@@ -2498,7 +2498,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
         // Recursively build BVHs for _children_
         if (bvhPrimitives.size() > 128 * 1024) {
             // Recursively build oldChild BVHs in parallel
-            ParallelFor(0, TreeWidth(), [&](int i) {
+            ParallelFor(0, TreeWidth, [&](int i) {
                 DCHECK_LE(splitpoints[i], splitpoints[i + 1]);
                 children[i] = buildRecursive(
                     threadAllocators,
@@ -2509,7 +2509,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
 
         } else {
             // Recursively build oldChild BVHs sequentially
-            for (int i = 0; i < TreeWidth(); i++) {
+            for (int i = 0; i < TreeWidth; i++) {
                 DCHECK_LE(splitpoints[i], splitpoints[i + 1]);
                 children[i] = buildRecursive(
                     threadAllocators,
@@ -2548,7 +2548,7 @@ int FourWideBVHAggregate::flattenBVH(FourWideBVHBuildNode *node, int *offset) {
     // Create interior flattened BVH newNode
     linearNode->axis = linearNode->ConstructAxis(node->splitAxis[0], node->splitAxis[1],
                                                  node->splitAxis[2]);
-    for (int i = 0; i < TreeWidth(); i++) {
+    for (int i = 0; i < TreeWidth; i++) {
         if (node->children[i]) {
             linearNode->bounds[i] = node->children[i]->bounds;
             linearNode->nPrimitives[i] = node->children[i]->nPrimitives;
@@ -2587,9 +2587,9 @@ pstd::optional<ShapeIntersection> EightWideBVHAggregate::Intersect(const Ray &ra
     int interiorTested = 0;
     int interiorHit = 0;
     while (true) {
-        simdNodesVisited += std::ceil(TreeWidth() / (float)SimdWidth);
+        simdNodesVisited += std::ceil(TreeWidth / (float)SimdWidth);
         const SIMDEightWideLinearBVHNode *node = &nodes[currentNodeIndex];
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             int idx = traversalIdx(dirIsNeg, node, i);
             if (node->offsets[idx] < 0)
                 continue;
@@ -2657,9 +2657,9 @@ bool EightWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     int interiorTested = 0;
     int interiorHit = 0;
     while (true) {
-        simdNodesVisited += std::ceil(TreeWidth() / (float)SimdWidth);
+        simdNodesVisited += std::ceil(TreeWidth / (float)SimdWidth);
         const SIMDEightWideLinearBVHNode *node = &nodes[currentNodeIndex];
-        for (int i = 0; i < TreeWidth(); ++i) {
+        for (int i = 0; i < TreeWidth; ++i) {
             int idx = traversalIdx(dirIsNeg, node, i);
             if (node->offsets[idx] < 0)
                 continue;
@@ -3239,7 +3239,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
         EightWideBVHBuildNode *children[MaxTreeWidth];
         if (bvhPrimitives.size() > 128 * 1024) {
             // Recursively build oldChild BVHs in parallel
-            ParallelFor(0, TreeWidth(), [&](int i) {
+            ParallelFor(0, TreeWidth, [&](int i) {
                 DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
                 children[i] = buildRecursive(
                     threadAllocators,
@@ -3250,7 +3250,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
 
         } else {
             // Recursively build oldChild BVHs sequentially
-            for (int i = 0; i < TreeWidth(); i++) {
+            for (int i = 0; i < TreeWidth; i++) {
                 DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
                 children[i] = buildRecursive(
                     threadAllocators,
@@ -3277,7 +3277,7 @@ int EightWideBVHAggregate::flattenBVH(EightWideBVHBuildNode *node, int *offset) 
             linearNode->bounds[0] = node->bounds;
             linearNode->offsets[0] = node->firstPrimOffset;
             linearNode->nPrimitives[0] = node->nPrimitives;
-            for (int i = 1; i < TreeWidth(); ++i) {
+            for (int i = 1; i < TreeWidth; ++i) {
                 linearNode->offsets[i] = -1;
             }
             (*offset)++;
@@ -3291,7 +3291,7 @@ int EightWideBVHAggregate::flattenBVH(EightWideBVHBuildNode *node, int *offset) 
         node->splitAxis[0], node->splitAxis[1], node->splitAxis[2], node->splitAxis[3],
         node->splitAxis[4], node->splitAxis[5], node->splitAxis[6]);
 
-    for (int i = 0; i < TreeWidth(); i++) {
+    for (int i = 0; i < TreeWidth; i++) {
         if (node->children[i]) {
             linearNode->bounds[i] = node->children[i]->bounds;
             linearNode->nPrimitives[i] = node->children[i]->nPrimitives;

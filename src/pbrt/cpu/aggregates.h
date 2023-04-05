@@ -84,10 +84,10 @@ class WideBVHAggregate : public BVHAggregate {
   public:
     Bounds3f Bounds() const override;
   protected:
-    WideBVHAggregate(int maxPrimsInNode, std::vector<Primitive> p, SplitMethod splitMethod,
+    WideBVHAggregate(int TreeWidth, int maxPrimsInNode, std::vector<Primitive> p, SplitMethod splitMethod,
                  Float epoRatio);
     static int constexpr MaxTreeWidth = 8;
-    virtual int TreeWidth() const = 0;
+    int const TreeWidth;
     virtual int8_t relevantAxisIdx(int axis1, int axis2) const = 0;
     bool optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes,
                       OptimizationStrategy strat = OptimizationStrategy::All);
@@ -109,7 +109,6 @@ class FourWideBVHAggregate : public WideBVHAggregate {
     bool IntersectP(const Ray &ray, Float tMax) const override;
 
   protected:
-    int TreeWidth() const override { return 4; };
     int8_t relevantAxisIdx(int axis1, int axis2) const override;
   private:
     // FourWideBVHAggregate Private Methods
@@ -152,7 +151,6 @@ class EightWideBVHAggregate : public WideBVHAggregate {
     bool IntersectP(const Ray &ray, Float tMax) const override;
     
   protected:
-    int TreeWidth() const override { return 8; };
     int8_t relevantAxisIdx(int a1, int a2) const override {
         return relevantAxisIdxArr[a1][a2];
     }
