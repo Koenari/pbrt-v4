@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <chrono>
 
 namespace pbrt {
 bool BVHEnableMetrics = true;
@@ -35,7 +36,10 @@ STAT_PIXEL_COUNTER("BVH/Primitive intersections", bvhTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH/SIMD Interior Nodes visited", bvhSimdNodesVisited);
 STAT_INT_DISTRIBUTION("BVH/Leaf Depth", bvhLeafDepth);
-STAT_INT_DISTRIBUTION("BVH/INt Node Depth", bvhIntNodeDepth);
+STAT_INT_DISTRIBUTION("BVH/Int Node Depth", bvhIntNodeDepth);
+STAT_COUNTER("BVH/Opti/Merge Leaves", bvhOptiLeaves);
+STAT_COUNTER("BVH/Opti/Merge Into Parent", bvhOptiIntoParent);
+STAT_COUNTER("BVH/Opti/Merge Inner", bvhOptiInner);
 // MortonPrimitive Definition
 struct MortonPrimitive {
     int primitiveIndex;
@@ -445,6 +449,8 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
     FourWideBVHBuildNode *root;
     std::atomic<int> totalNodesLocal{0};
     std::atomic<int> orderedPrimsOffset{0};
+    // Build BVH according to selected _splitMethod_
+    auto start = std::chrono::high_resolution_clock::now();
     if (method == CreationMethod::FromBVH) {
         BVHEnableMetrics = false;
         BinBVHAggregate *binTree =
@@ -460,23 +466,26 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
                               &totalNodesLocal, &orderedPrimsOffset, orderedPrims,
                               splitVariant);
     }
-
-    // Build BVH according to selected _splitMethod_
-
+    auto end = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     CHECK_EQ(orderedPrimsOffset.load(), orderedPrims.size());
-
     primitives.swap(orderedPrims);
-    // Convert BVH into compact representation in _nodes_ array
+    
     bvhPrimitives.resize(0);
     LOG_VERBOSE(
         "WideBVH created with %d nodes for %d primitives (%.2f MB)",
         totalNodesLocal.load(), (int)primitives.size(),
         totalNodesLocal.load() * sizeof(SIMDFourWideLinearBVHNode) / (1024.f * 1024.f));
+    LOG_VERBOSE("Creation took: %d ms", time.count());
+    start = std::chrono::high_resolution_clock::now();
     if (optimizeTree(root, &totalNodesLocal, opti)) {
+        end = std::chrono::high_resolution_clock::now();
+        time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                     totalNodesLocal.load(), (int)primitives.size(),
                     totalNodesLocal.load() * sizeof(SIMDFourWideLinearBVHNode) /
                         (1024.f * 1024.f));
+        LOG_VERBOSE("Optimization took: %d ms", time.count());
     }
     Float treeCost = calcMetrics(root, 0);
     LOG_VERBOSE("Calulated cost for BVH is: {%.3f}", treeCost);
@@ -487,6 +496,7 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
     nodeBytes += totalNodesLocal * sizeof(SIMDFourWideLinearBVHNode);
     nodes = new SIMDFourWideLinearBVHNode[totalNodesLocal];
     int offset = 0;
+    // Convert BVH into compact representation in _nodes_ array
     flattenBVH(root, &offset);
     CHECK_EQ(totalNodesLocal.load(), offset);
 }
@@ -523,7 +533,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     EightWideBVHBuildNode *root;
     std::atomic<int> totalNodesLocal{0};
     std::atomic<int> orderedPrimsOffset{0};
-
+    auto start = std::chrono::high_resolution_clock::now();
     if (method == CreationMethod::FromBVH) {
         BVHEnableMetrics = false;
         BinBVHAggregate *binTree =
@@ -539,6 +549,8 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
                               &totalNodesLocal, &orderedPrimsOffset, orderedPrims,
                               splitVariant);
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     // Build BVH according to selected _splitMethod_
 
     CHECK_EQ(orderedPrimsOffset.load(), orderedPrims.size());
@@ -550,11 +562,16 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
         "WideBVH created with %d nodes for %d primitives (%.2f MB)",
         totalNodesLocal.load(), (int)primitives.size(),
         totalNodesLocal.load() * sizeof(SIMDEightWideLinearBVHNode) / (1024.f * 1024.f));
+    LOG_VERBOSE("Creation took: %d ms", time.count());
+    start = std::chrono::high_resolution_clock::now();
     if (optimizeTree(root, &totalNodesLocal, opti)) {
+        end = std::chrono::high_resolution_clock::now();
+        time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
                     totalNodesLocal.load(), (int)primitives.size(),
-                    totalNodesLocal.load() * sizeof(SIMDEightWideLinearBVHNode) /
+                    totalNodesLocal.load() * sizeof(SIMDFourWideLinearBVHNode) /
                         (1024.f * 1024.f));
+        LOG_VERBOSE("Optimization took: %d ms", time.count());
     }
     Float treeCost = calcMetrics(root, 0);
     LOG_VERBOSE("Calulated cost for BVH is: {%.3f}", treeCost);
@@ -836,14 +853,14 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
 bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes,
                                     OptimizationStrategy strat) {
     bool didOptimize = false;
-    auto mergeChildIntoParent = [this, totalNodes](WideBVHBuildNode *parent) {
+    auto mergeChildIntoParent = [=](WideBVHBuildNode *parent) {
         bool opmiziationDone = false;
         for (int mergedChildIdx = 0; mergedChildIdx < TreeWidth; ++mergedChildIdx) {
             auto child = parent->getChild(mergedChildIdx);
             if (child == NULL || child->IsLeaf())
                 continue;
             if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth) {
-                LOG_VERBOSE("Merged child into parent");
+                bvhOptiIntoParent++;
                 emptyNodes -= (TreeWidth - 1);
                 --interiorNodes;
                 --*totalNodes;
@@ -912,7 +929,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
         return opmiziationDone;
     };
     // Will not implement for now as there is no benefit for now
-    auto mergeLeafChildren = [this](WideBVHBuildNode *parent) {
+    auto mergeLeafChildren = [=](WideBVHBuildNode *parent) {
         bool opmtimizationDone = false;
         // See if any merges are benficial
         for (int i = 0; i < TreeWidth; ++i) {
@@ -950,7 +967,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 float newCost = childCost(i, TreeWidth, newNodes);
                 float costReduction = (oldCost1 + oldCost2) - newCost;
                 if (costReduction > 0) {
-                    LOG_VERBOSE("Merged two leaves");
+                    bvhOptiLeaves++;
                     opmtimizationDone = true;
                     child1->nPrimitives = newLeaf.count;
                     child1->bounds = newLeaf.bounds;
@@ -965,7 +982,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
         }
         return opmtimizationDone;
     };
-    auto mergeInnerNodeChildren = [this, totalNodes](WideBVHBuildNode *parent) {
+    auto mergeInnerNodeChildren = [=](WideBVHBuildNode *parent) {
         bool opmtimizationDone = false;
         while (true) {
             int bestI = -1, bestJ = -1;
@@ -1010,7 +1027,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             }
             if (maxReduction <= 0)
                 return opmtimizationDone;
-            LOG_VERBOSE("Merged two inner children");
+            bvhOptiInner++;
             opmtimizationDone = true;
             --*totalNodes;
             --interiorNodes;
