@@ -218,6 +218,7 @@ class BinBVHAggregate : BVHAggregate {
                                 int end, std::atomic<int> *totalNodes) const;
     int flattenBVH(BVHBuildNode *node, int *offset);
     Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
+    Float calcMetrics(BVHBuildNode *root) const;
     // BinBVHAggregate Private Members
     LinearBVHNode *nodes = nullptr;
 };
