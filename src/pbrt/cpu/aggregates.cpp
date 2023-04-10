@@ -399,6 +399,7 @@ BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNod
     BVHBuildNode *root;
     // Build BVH according to selected _splitMethod_
     std::atomic<int> totalNodes{0};
+    auto start = std::chrono::high_resolution_clock::now();
     if (splitMethod == SplitMethod::HLBVH) {
         root = buildHLBVH(alloc, bvhPrimitives, &totalNodes, orderedPrims);
     } else {
@@ -407,6 +408,8 @@ BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNod
                               &totalNodes, &orderedPrimsOffset, orderedPrims);
         CHECK_EQ(orderedPrimsOffset.load(), orderedPrims.size());
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     primitives.swap(orderedPrims);
 
     // Convert BVH into compact representation in _nodes_ array
@@ -416,6 +419,7 @@ BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNod
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
     treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
+    LOG_VERBOSE("Creation took: %d ms", time.count());
     Float treeCost = calcMetrics(root);
     LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
     nodes = new LinearBVHNode[totalNodes];
@@ -1140,6 +1144,8 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
     int interiorTested = 0;
     int leavesHit = 0;
     int leavesTested = 0;
+    int simdNodes = 0;
+    int simdTriangles = 0;
     while (true) {
         ++nodesVisited;
         const LinearBVHNode *node = &nodes[currentNodeIndex];
@@ -1148,10 +1154,12 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
             leavesTested++;
         } else {
             interiorTested++;
+            simdNodes += pstd::ceil(2.f / SimdWidth);
         }
         if (node->bounds.IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
             if (node->nPrimitives > 0) {
                 trianglesTested += node->nPrimitives;
+                simdTriangles += pstd::ceil(node->nPrimitives / (Float)SimdWidth);
                 bvhAvgLeaveSizeHit << (int)(node->nPrimitives);
                 leavesHit++;
                 // Intersect ray with primitives in leaf BVH newNode
@@ -1187,6 +1195,8 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
     }
     bvhSisdTriangleTests += trianglesTested;
     bvhSisdNodesVisited += nodesVisited;
+    bvhSimdNodesVisited += simdNodes;
+    bvhSimdTriangleTests += simdTriangles;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
