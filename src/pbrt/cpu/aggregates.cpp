@@ -787,44 +787,43 @@ EightWideBVHAggregate *EightWideBVHAggregate::Create(
 Float BVHAggregate::leafCost(int primCount) const {
     return pstd::ceil(primCount / (Float)SimdWidth);
 };
-Float BVHAggregate::penalizedHitProbability(int idx, int count,
-                                            ICostCalcable **buckets) const {
+Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **buckets,
+                                            Bounds3f combinedBounds) const {
     const ICostCalcable *bucket = buckets[idx];
     if (idx >= count || bucket == NULL)
         return 0.f;
-    Bounds3f combinedBounds;
-    for (int i = 0; i < count; ++i)
-        if (buckets[i])
-            combinedBounds = Union(combinedBounds, buckets[i]->Bounds());
     Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
     if (splitMethod == SplitMethod::EPO) {
         Bounds3f overlap;
         for (int j = 0; j < count; ++j) {
             if (j == idx || !(buckets[j]))
                 continue;
-            overlap =
-                Union(overlap, pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds()));
+            Bounds3f curOverlap = pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds());
+            if (!curOverlap.IsEmpty())
+                overlap = Union(overlap,curOverlap);
         }
         if (!overlap.IsEmpty())
             prob *= (1.f + epoRatio * overlap.Volume() / combinedBounds.Volume());
     }
     return prob;
 }
-Float BVHAggregate::childCost(int idx, int count, ICostCalcable **buckets) const {
+Float BVHAggregate::childCost(int idx, int count, ICostCalcable **buckets,
+                              Bounds3f combinedBounds) const {
     // All metrics are 0  for empty buckets
     if (buckets[idx] && buckets[idx]->PrimCount()) {
         return leafCost(buckets[idx]->PrimCount()) *
-               penalizedHitProbability(idx, count, buckets);
+               penalizedHitProbability(idx, count, buckets, combinedBounds);
     } else {
         return 0.f;
     }
 }
-Float BVHAggregate::splitCost(int count, ICostCalcable **buckets) const {
+Float BVHAggregate::splitCost(int count, ICostCalcable **buckets,
+                              Bounds3f combinedBounds) const {
     if (splitMethod != SplitMethod::SAH && splitMethod != SplitMethod::EPO)
         return 0.f;
     Float cost = 0.f;
     for (int i = 0; i < count; ++i) {
-        cost += childCost(i, count, buckets);
+        cost += childCost(i, count, buckets,combinedBounds);
     }
     return cost;
 }
@@ -847,7 +846,7 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
         for (int i = 0; i < TreeWidth; ++i) {
             if (!(root->getChild(i)))
                 continue;
-            cost += penalizedHitProbability(i, TreeWidth, nodes) *
+            cost += penalizedHitProbability(i, TreeWidth, nodes, root->bounds) *
                     calcMetrics(root->getChild(i), depth + 1);
         }
         return cost;
@@ -965,9 +964,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                         newNodes[k] = oldNodes[k];
                     }
                 }
-                float oldCost1 = childCost(i, TreeWidth, oldNodes);
-                float oldCost2 = childCost(j, TreeWidth, oldNodes);
-                float newCost = childCost(i, TreeWidth, newNodes);
+                float oldCost1 = childCost(i, TreeWidth, oldNodes, parent->bounds);
+                float oldCost2 = childCost(j, TreeWidth, oldNodes, parent->bounds);
+                float newCost = childCost(i, TreeWidth, newNodes, parent->bounds);
                 float costReduction = (oldCost1 + oldCost2) - newCost;
                 if (costReduction > 0) {
                     bvhOptiLeaves++;
@@ -1016,9 +1015,11 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                                 newNodes[k] = oldNodes[k];
                             }
                         }
-                        Float oldCost1 = childCost(i, TreeWidth, oldNodes);
-                        Float oldCost2 = childCost(j, TreeWidth, oldNodes);
-                        Float newCost = childCost(i, TreeWidth, newNodes);
+                        Float oldCost1 =
+                            childCost(i, TreeWidth, oldNodes, parent->bounds);
+                        Float oldCost2 =
+                            childCost(j, TreeWidth, oldNodes, parent->bounds);
+                        Float newCost = childCost(i, TreeWidth, newNodes, parent->bounds);
                         float costReduction = (oldCost1 + oldCost2) - newCost;
                         if (costReduction > maxReduction) {
                             maxReduction = costReduction;
@@ -1223,9 +1224,9 @@ bool BinBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     return false;
 }
 //Private Funcs
-Float BinBVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right) const {
+Float BinBVHAggregate::splitCost(BVHSplitBucket left, BVHSplitBucket right, Bounds3f bounds) const {
     ICostCalcable *buckets[2] = {&left, &right};
-    return BVHAggregate::splitCost(2, buckets);
+    return BVHAggregate::splitCost(2, buckets,bounds);
 }
 BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocators,
                                               pstd::span<BVHPrimitive> bvhPrimitives,
@@ -1360,8 +1361,8 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                     for (int i = 0; i < nSplits; ++i) {
                         // Compute cost for candidate split and update minimum if
                         // necessary
-                        cost = splitCost(bucketsBelow[i], bucketsAbove[i]);
-                        CHECK_GT(cost, 0);
+                        cost = splitCost(bucketsBelow[i], bucketsAbove[i], bounds);
+                        DCHECK_GT(cost, 0);
                         if (cost < minCost) {
                             minCost = cost;
                             minCostSplitBucket = i;
@@ -1673,9 +1674,10 @@ Float BinBVHAggregate::calcMetrics(BVHBuildNode *root) const {
         ICostCalcable *children[2];
         children[0] = root->children[0];
         children[1] = root->children[1];
-        CHECK_GE(penalizedHitProbability(0, 2, children), root->children[0]->bounds.SurfaceArea() / root->bounds.SurfaceArea());
-        cost += penalizedHitProbability(0, 2, children) * calcMetrics(root->children[0]);
-        cost += penalizedHitProbability(1, 2, children) * calcMetrics(root->children[1]);
+        cost += penalizedHitProbability(0, 2, children, root->bounds) *
+                calcMetrics(root->children[0]);
+        cost += penalizedHitProbability(1, 2, children, root->bounds) *
+                calcMetrics(root->children[1]);
         return cost;
     }
 }
@@ -2009,7 +2011,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                     // necessary
                     curBuckets[0] = &bucketsBelow[i];
                     curBuckets[1] = &bucketsAbove[i];
-                    float cost = splitCost(2, curBuckets);
+                    float cost = splitCost(2, curBuckets, bounds);
                     if (cost < minCost) {
                         minCost = cost;
                         minCostSplitBucket1 = i;
@@ -2069,7 +2071,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                             curBuckets[0]->PrimCount() + curBuckets[1]->PrimCount() +
                                 curBuckets[2]->PrimCount() + curBuckets[3]->PrimCount(),
                             bvhPrimitives.size());
-                        float cost = splitCost(4, curBuckets);
+                        float cost = splitCost(4, curBuckets,bounds);
                         if (cost < minCost) {
                             minCost = cost;
                             minCostSplitBucket0 = split0;
@@ -2194,7 +2196,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         // necessary
                         curBuckets[0] = &tempBucketsBel[i];
                         curBuckets[1] = &tempBucketsAbv[i];
-                        float cost = splitCost(2, curBuckets);
+                        float cost = splitCost(2, curBuckets, bounds);
                         if (cost < minCost) {
                             minCost = cost;
                             dim1ProposedSplit = i;
@@ -2363,7 +2365,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                                               curBuckets[2]->PrimCount() +
                                               curBuckets[3]->PrimCount());
 
-                                float cost = splitCost(4, curBuckets);
+                                float cost = splitCost(4, curBuckets,bounds);
                                 DCHECK_GT(cost, 0);
                                 if (cost < minCost) {
                                     minCost = cost;
@@ -2481,12 +2483,14 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                     int minCostSplitBucket = -1;
                     Float minCost = Infinity;
                     ICostCalcable *curBuckets[2];
+                    Bounds3f curBounds =
+                        Union(bucketsBelow[0].bounds, bucketsAbove[0].bounds);
                     for (int i = 0; i < nSplits; ++i) {
                         // Compute cost for candidate split and update minimum if
                         // necessary
                         curBuckets[0] = &bucketsBelow[i];
                         curBuckets[1] = &bucketsAbove[i];
-                        float cost = splitCost(2, curBuckets);
+                        float cost = splitCost(2, curBuckets, curBounds);
                         if (cost < minCost) {
                             minCost = cost;
                             minCostSplitBucket = i;
@@ -3096,7 +3100,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                                 curBuckets[4]->PrimCount() + curBuckets[5]->PrimCount() +
                                 curBuckets[6]->PrimCount() + curBuckets[7]->PrimCount());
 
-                        Float cost = splitCost(8, curBuckets);
+                        Float cost = splitCost(8, curBuckets, bounds);
                         DCHECK_GT(cost, 0);
                         if (cost < minCost) {
                             minCost = cost;
@@ -3162,7 +3166,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 // find child to split
                 for (int j = 1; j < i + 2; ++j) {
                     Float curCost =
-                        childCost(j - 1, 7, (ICostCalcable **)proposedBuckets);
+                        childCost(j - 1, 7, (ICostCalcable **)proposedBuckets,bounds);
                     if (curCost > highestCost) {
                         highestCost = curCost;
                         bestSplit = j;
@@ -3230,7 +3234,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                     // necessary
                     curBuckets[0] = &bucketsBelow[i];
                     curBuckets[1] = &bucketsAbove[i];
-                    float cost = splitCost(2, curBuckets);
+                    float cost = splitCost(2, curBuckets,bounds);
                     if (cost < minCost) {
                         minCost = cost;
                         minCostBucket = i;

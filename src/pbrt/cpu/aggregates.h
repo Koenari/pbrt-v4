@@ -76,9 +76,9 @@ class BVHAggregate {
     std::vector<Primitive> primitives;
     SplitMethod splitMethod;
     Float epoRatio;
-    Float penalizedHitProbability(int idx, int count, ICostCalcable **buckets) const;
-    Float childCost(int idx, int count, ICostCalcable **buckets) const;
-    Float splitCost(int count, ICostCalcable **buckets) const;
+    Float penalizedHitProbability(int idx, int count, ICostCalcable **buckets, Bounds3f parent) const;
+    Float childCost(int idx, int count, ICostCalcable **buckets, Bounds3f parent) const;
+    Float splitCost(int count, ICostCalcable **buckets, Bounds3f parent) const;
     Float inline leafCost(int primCount) const;
 };
 class WideBVHAggregate : public BVHAggregate {
@@ -217,7 +217,7 @@ class BinBVHAggregate : BVHAggregate {
                                 std::vector<BVHBuildNode *> &treeletRoots, int start,
                                 int end, std::atomic<int> *totalNodes) const;
     int flattenBVH(BVHBuildNode *node, int *offset);
-    Float splitCost(BVHSplitBucket left, BVHSplitBucket right) const;
+    Float splitCost(BVHSplitBucket left, BVHSplitBucket right, Bounds3f bounds) const;
     Float calcMetrics(BVHBuildNode *root) const;
     // BinBVHAggregate Private Members
     LinearBVHNode *nodes = nullptr;
