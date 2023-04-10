@@ -57,6 +57,7 @@ class BVHAggregate {
         MergeLeaves = 4,
         All = 0x7F
     };
+    static int WidthOverride;
     static Float epoRatioOverride;
     static int maxPrimsInNodeOverride;
     static int splitVariantOverride;

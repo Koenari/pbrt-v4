@@ -54,6 +54,7 @@ struct LBVHTreelet {
     BVHBuildNode *buildNodes;
 };
 int BVHAggregate::SimdWidth = 1;
+int BVHAggregate::WidthOverride = -1;
 int BVHAggregate::maxPrimsInNodeOverride = -1;
 int BVHAggregate::splitVariantOverride = -1;
 Float BVHAggregate::epoRatioOverride = -1;
@@ -416,7 +417,7 @@ BinBVHAggregate::BinBVHAggregate(std::vector<Primitive> prims, int maxPrimsInNod
     treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     Float treeCost = calcMetrics(root);
-    LOG_VERBOSE("Calulated cost for BVH is: {%.3f}", treeCost);
+    LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
     nodes = new LinearBVHNode[totalNodes];
     int offset = 0;
     flattenBVH(root, &offset);
@@ -494,7 +495,7 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
         LOG_VERBOSE("Optimization took: %d ms", time.count());
     }
     Float treeCost = calcMetrics(root, 0);
-    LOG_VERBOSE("Calulated cost for BVH is: {%.3f}", treeCost);
+    LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
     if (totalNodes == 0)
         totalNodes++;
     treeBytes += totalNodesLocal * sizeof(SIMDFourWideLinearBVHNode) + sizeof(*this) +
@@ -579,7 +580,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
         LOG_VERBOSE("Optimization took: %d ms", time.count());
     }
     Float treeCost = calcMetrics(root, 0);
-    LOG_VERBOSE("Calulated cost for BVH is: {%.3f}", treeCost);
+    LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
     if (totalNodes == 0)
         totalNodes++;
     treeBytes += totalNodesLocal * sizeof(SIMDEightWideLinearBVHNode) + sizeof(*this) +
@@ -598,19 +599,35 @@ Primitive CreateAccelerator(std::vector<Primitive> prims) {
 Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prims,
                             const ParameterDictionary &parameters) {
     Primitive accel = nullptr;
-    if (name == "bvh" || name == "widebvh4")
+    std::string localName = name;
+    if (BVHAggregate::WidthOverride > 0) {
+        switch (BVHAggregate::WidthOverride) {
+        case 2:
+            localName = "binbvh";
+            break;
+        case 4:
+            localName = "widebvh4";
+            break;
+        case 8:
+            localName = "widebvh8";
+            break;
+        default:
+            break;
+        }
+    }
+    if (localName == "bvh" || localName == "widebvh4")
         accel = FourWideBVHAggregate::Create(std::move(prims), parameters);
-    else if (name == "widebvh8")
+    else if (localName == "widebvh8")
         accel = EightWideBVHAggregate::Create(std::move(prims), parameters);
-    else if (name == "binbvh")
+    else if (localName == "binbvh")
         accel = BinBVHAggregate::Create(std::move(prims), parameters);
-    else if (name == "kdtree")
+    else if (localName == "kdtree")
         accel = KdTreeAggregate::Create(std::move(prims), parameters);
     else
-        ErrorExit("%s: accelerator type unknown.", name);
+        ErrorExit("%s: accelerator type unknown.", localName);
 
     if (!accel)
-        ErrorExit("%s: unable to create accelerator.", name);
+        ErrorExit("%s: unable to create accelerator.", localName);
 
     parameters.ReportUnused();
     return accel;
