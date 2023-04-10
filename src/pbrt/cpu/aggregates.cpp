@@ -22,7 +22,7 @@
 namespace pbrt {
 bool BVHEnableMetrics = true;
 
-STAT_MEMORY_COUNTER("Memory/BVH", treeBytes);
+STAT_MEMORY_COUNTER("Memory/BVH Memory", treeBytes);
 //Tree Creation
 STAT_RATIO("BVH Creation/Count Primitives per leaf", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH Creation/Count Interior Nodes", interiorNodes);
@@ -500,8 +500,9 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
     }
     Float treeCost = calcMetrics(root, 0);
     LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
-    if (totalNodes == 0)
-        totalNodes++;
+    // Root is leaf
+    if (totalNodesLocal == 0)
+        totalNodesLocal++;
     treeBytes += totalNodesLocal * sizeof(SIMDFourWideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     nodes = new SIMDFourWideLinearBVHNode[totalNodesLocal];
@@ -585,8 +586,9 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     }
     Float treeCost = calcMetrics(root, 0);
     LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
-    if (totalNodes == 0)
-        totalNodes++;
+    //Root is leaf
+    if (totalNodesLocal == 0)
+        totalNodesLocal++;
     treeBytes += totalNodesLocal * sizeof(SIMDEightWideLinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);
     nodes = new SIMDEightWideLinearBVHNode[totalNodesLocal];
