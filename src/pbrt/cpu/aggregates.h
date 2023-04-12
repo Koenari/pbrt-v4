@@ -61,6 +61,7 @@ class BVHAggregate {
     static Float epoRatioOverride;
     static int maxPrimsInNodeOverride;
     static int splitVariantOverride;
+    static int collapseVariantOverride;
     static std::string splitMethodOverride;
     static std::string creationMethodOverride;
     static std::string optimizationStrategyOverride;
@@ -103,7 +104,7 @@ class FourWideBVHAggregate : public WideBVHAggregate {
         SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f,
                      int splitVariant = 0, 
         CreationMethod method = CreationMethod::Direct, 
-        OptimizationStrategy = OptimizationStrategy::All);
+        OptimizationStrategy = OptimizationStrategy::All, int collapseVariant = 0);
     static FourWideBVHAggregate *Create(std::vector<Primitive> prims,
                                 const ParameterDictionary &parameters);
     
@@ -121,7 +122,8 @@ class FourWideBVHAggregate : public WideBVHAggregate {
                                  std::vector<Primitive> &orderedPrims,
                                  int splitVariant);
     int flattenBVH(FourWideBVHBuildNode *node, int *offset);
-    FourWideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
+    FourWideBVHBuildNode *collapseBinBVH(BVHBuildNode *root, std::atomic<int> *totalNodes,
+                                       int collapseVariant);
     // FourWideBVHAggregate Private Members
     
     
@@ -143,7 +145,8 @@ class EightWideBVHAggregate : public WideBVHAggregate {
     EightWideBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,
                      SplitMethod splitMethod = SplitMethod::SAH, Float epoRatio = 0.5f,
                      int splitVariant = 0, CreationMethod method = CreationMethod::Direct,
-                     OptimizationStrategy = OptimizationStrategy::All);
+                          OptimizationStrategy = OptimizationStrategy::All,
+                          int collapseVariant = 0);
     
     static EightWideBVHAggregate *Create(std::vector<Primitive> prims,
                                          const ParameterDictionary &parameters);
@@ -164,7 +167,7 @@ class EightWideBVHAggregate : public WideBVHAggregate {
                                      std::atomic<int> *orderedPrimsOffset,
                                      std::vector<Primitive> &orderedPrims,
                                      int splitVariant);
-    EightWideBVHBuildNode *buildFromBVH(BVHBuildNode *root, std::atomic<int> *totalNodes);
+    EightWideBVHBuildNode *collapseBinBVH(BVHBuildNode *root, std::atomic<int> *totalNodes, int collapseVariant);
     int flattenBVH(EightWideBVHBuildNode *node, int *offset);
     static int traversalIdx(int dirIsNeg[3],const SIMDEightWideLinearBVHNode *node, int idx);
     // FourWideBVHAggregate Private Members

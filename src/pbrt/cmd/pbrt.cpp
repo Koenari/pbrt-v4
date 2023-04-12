@@ -213,6 +213,8 @@ int main(int argc, char *argv[]) {
                      onError) ||
             ParseArg(&iter, args.end(), "splitVariant",
                      &BVHAggregate::splitVariantOverride, onError) ||
+            ParseArg(&iter, args.end(), "collapseVariant",
+                     &BVHAggregate::collapseVariantOverride, onError) ||
             ParseArg(&iter, args.end(), "optimizationStrategy",
                      &BVHAggregate::optimizationStrategyOverride, onError) ||
             ParseArg(&iter, args.end(), "creationMethod",

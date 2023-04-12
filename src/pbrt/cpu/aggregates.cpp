@@ -54,6 +54,7 @@ struct LBVHTreelet {
     BVHBuildNode *buildNodes;
 };
 int BVHAggregate::SimdWidth = 1;
+int BVHAggregate::collapseVariantOverride = -1;
 int BVHAggregate::WidthOverride = -1;
 int BVHAggregate::maxPrimsInNodeOverride = -1;
 int BVHAggregate::splitVariantOverride = -1;
@@ -431,7 +432,8 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
                                            int maxPrimsInNode, SplitMethod splitMethod,
                                            Float epoRatio, int splitVariant,
                                            CreationMethod method,
-                                           OptimizationStrategy opti)
+                                           OptimizationStrategy opti,
+                                           int collapseVariant)
     : WideBVHAggregate(4,std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
                        epoRatio) {
     CHECK(!primitives.empty());
@@ -444,7 +446,7 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
     for (size_t i = 0; i < primitives.size(); ++i)
         bvhPrimitives[i] = BVHPrimitive(i, primitives[i].Bounds());
-
+    
     // Build BVH for primitives using _bvhPrimitives_
     // Declare _Allocator_s used for BVH construction
     pstd::pmr::monotonic_buffer_resource resource;
@@ -471,7 +473,7 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
             &orderedPrimsOffset, orderedPrims);
         totalNodesLocal = 0;
         BVHEnableMetrics = true;
-        root = buildFromBVH(binRoot, &totalNodesLocal);
+        root = collapseBinBVH(binRoot, &totalNodesLocal, collapseVariant);
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
                               &totalNodesLocal, &orderedPrimsOffset, orderedPrims,
@@ -515,7 +517,8 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
                                              int maxPrimsInNode, SplitMethod splitMethod,
                                              Float epoRatio, int splitVariant,
                                              CreationMethod method,
-                                             OptimizationStrategy opti)
+                                             OptimizationStrategy opti,
+                                             int collapseVariant)
     : WideBVHAggregate(8,std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
                        epoRatio) {
     CHECK(!primitives.empty());
@@ -528,7 +531,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
     for (size_t i = 0; i < primitives.size(); ++i)
         bvhPrimitives[i] = BVHPrimitive(i, primitives[i].Bounds());
-
+        
     // Build BVH for primitives using _bvhPrimitives_
     // Declare _Allocator_s used for BVH construction
     pstd::pmr::monotonic_buffer_resource resource;
@@ -554,7 +557,7 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
             &orderedPrimsOffset, orderedPrims);
         totalNodesLocal = 0;
         BVHEnableMetrics = true;
-        root = buildFromBVH(binRoot, &totalNodesLocal);
+        root = collapseBinBVH(binRoot, &totalNodesLocal, collapseVariant);
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
                               &totalNodesLocal, &orderedPrimsOffset, orderedPrims,
@@ -729,11 +732,14 @@ FourWideBVHAggregate *FourWideBVHAggregate::Create(
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     if (splitVariantOverride >= 0)
         splitVariant = splitVariantOverride;
+    int collapseVariant = parameters.GetOneInt("collapseVariant", 0);
+    if (collapseVariantOverride >= 0)
+        collapseVariant = collapseVariantOverride;
     Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
     if (epoRatioOverride >= 0)
         epoRatio = epoRatioOverride;
     return new FourWideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,
-                                    epoRatio, splitVariant, creationMethod, optiStrat);
+                                    epoRatio, splitVariant, creationMethod, optiStrat, collapseVariant);
 }
 EightWideBVHAggregate *EightWideBVHAggregate::Create(
     std::vector<Primitive> prims, const ParameterDictionary &parameters) {
@@ -797,11 +803,14 @@ EightWideBVHAggregate *EightWideBVHAggregate::Create(
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
     if (splitVariantOverride >= 0)
         splitVariant = splitVariantOverride;
+    int collapseVariant = parameters.GetOneInt("collapseVariant", 0);
+    if (collapseVariantOverride >= 0)
+        collapseVariant = collapseVariantOverride;
     Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
     if (epoRatioOverride >= 0)
         epoRatio = epoRatioOverride;
     return new EightWideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,
-                                     epoRatio, splitVariant, creationMethod, optiStrat);
+                                     epoRatio, splitVariant, creationMethod, optiStrat,collapseVariant);
 }
 #pragma endregion
 
@@ -1848,28 +1857,45 @@ int8_t FourWideBVHAggregate::relevantAxisIdx(int axis1, int axis2) const {
     return relevantAxisIdxArr[axis1][axis2];
 }
 //Private functions
-FourWideBVHBuildNode *FourWideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot,
-                                                         std::atomic<int> *totalNodes) {
+FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot,
+                                                         std::atomic<int> *totalNodes,
+                                                         int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         FourWideBVHBuildNode *leaf = new FourWideBVHBuildNode();
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
-    FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
     FourWideBVHBuildNode *children[4]{};
-    int axis[3] = {binRoot->children[0]->splitAxis, binRoot->splitAxis,
-                   binRoot->children[1]->splitAxis};
-    for (int i = 0; i < 2; ++i) {
-        auto child = binRoot->children[i];
-        if (child->nPrimitives > 0) {
-            children[i * 2] = buildFromBVH(child, totalNodes);
-            children[i * 2 + 1] = NULL;
-        } else {
-            children[i * 2] = buildFromBVH(child->children[0], totalNodes);
-            children[i * 2 + 1] = buildFromBVH(child->children[1], totalNodes);
+    int axis[3]{};
+    switch (collapseVariant) {
+    //Just widen node with empty children
+    case 1:
+        children[2] = children[3] = NULL;
+        axis[0] = binRoot->splitAxis;
+        children[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        children[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        break;
+    //Taking grandchildren as children
+    default:
+        axis[0] = binRoot->children[0]->splitAxis;
+        axis[1] = binRoot->splitAxis;
+        axis[2] = binRoot->children[1]->splitAxis;
+        for (int i = 0; i < 2; ++i) {
+            auto child = binRoot->children[i];
+            if (child->nPrimitives > 0) {
+                children[i * 2] = collapseBinBVH(child, totalNodes, collapseVariant);
+                children[i * 2 + 1] = NULL;
+            } else {
+                children[i * 2] =
+                    collapseBinBVH(child->children[0], totalNodes, collapseVariant);
+                children[i * 2 + 1] =
+                    collapseBinBVH(child->children[1], totalNodes, collapseVariant);
+            }
         }
+        break;
     }
     ++*totalNodes;
+    FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
     node->InitInterior(axis, children);
     return node;
 };
@@ -2777,43 +2803,61 @@ bool EightWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
 }
 //vfuncs WideBVH
 //Private funcs
-EightWideBVHBuildNode *EightWideBVHAggregate::buildFromBVH(BVHBuildNode *binRoot,
-                                                           std::atomic<int> *totalNodes) {
+EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot,
+                                                           std::atomic<int> *totalNodes, int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         EightWideBVHBuildNode *leaf = new EightWideBVHBuildNode();
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
+    EightWideBVHBuildNode *newChildren[8]{NULL};
+    int axis[7]{};
+    switch (collapseVariant) {
+    case 1:
+        axis[0] = binRoot->splitAxis;
+        newChildren[0] =
+            collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        newChildren[1] =
+            collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        break;
+    default:
+        axis[3] = binRoot->splitAxis;
+        BVHBuildNode *intermediateChildren[4]{};
+        // First iteration (Flatten to 4 nodes)
+        for (int i = 0; i < 2; ++i) {
+            auto oldChild = binRoot->children[i];
+            axis[i * 4 + 1] = oldChild->splitAxis;
+            if (oldChild->nPrimitives > 0) {
+                intermediateChildren[i * 2] = oldChild;
+                intermediateChildren[i * 2 + 1] = NULL;
+            } else {
+                intermediateChildren[i * 2] = oldChild->children[0];
+                intermediateChildren[i * 2 + 1] = oldChild->children[1];
+            }
+        }
+        // merge these four's children to eight
+        for (int i = 0; i < 4; ++i) {
+            auto oldChild = intermediateChildren[i];
+            if (!oldChild) {
+                newChildren[i * 2] = NULL;
+                newChildren[i * 2 + 1] = NULL;
+                continue;
+            }
+            axis[i * 2] = oldChild->splitAxis;
+            if (oldChild->nPrimitives > 0) {
+                newChildren[i * 2] =
+                    collapseBinBVH(oldChild, totalNodes, collapseVariant);
+                newChildren[i * 2 + 1] = NULL;
+            } else {
+                newChildren[i * 2] =
+                    collapseBinBVH(oldChild->children[0], totalNodes, collapseVariant);
+                newChildren[i * 2 + 1] =
+                    collapseBinBVH(oldChild->children[1], totalNodes, collapseVariant);
+            }
+        }
+        break;
+    }
     EightWideBVHBuildNode *newNode = new EightWideBVHBuildNode();
-    BVHBuildNode *intermediateChildren[4]{};
-    EightWideBVHBuildNode *newChildren[8]{};
-    int axis[3] = {binRoot->children[0]->splitAxis, binRoot->splitAxis,
-                   binRoot->children[1]->splitAxis};
-    // First iteration (Flatten to 4 nodes)
-    for (int i = 0; i < 2; ++i) {
-        auto oldChild = binRoot->children[i];
-        if (oldChild->nPrimitives > 0) {
-            intermediateChildren[i * 2] = oldChild;
-            intermediateChildren[i * 2 + 1] = NULL;
-        } else {
-            intermediateChildren[i * 2] = oldChild->children[0];
-            intermediateChildren[i * 2 + 1] = oldChild->children[1];
-        }
-    }
-    // merge these four's children to eight
-    for (int i = 0; i < 4; ++i) {
-        auto oldChild = intermediateChildren[i];
-        if (!oldChild) {
-            newChildren[i * 2] = NULL;
-            newChildren[i * 2 + 1] = NULL;
-        } else if (oldChild->nPrimitives > 0) {
-            newChildren[i * 2] = buildFromBVH(oldChild, totalNodes);
-            newChildren[i * 2 + 1] = NULL;
-        } else {
-            newChildren[i * 2] = buildFromBVH(oldChild->children[0], totalNodes);
-            newChildren[i * 2 + 1] = buildFromBVH(oldChild->children[1], totalNodes);
-        }
-    }
     ++*totalNodes;
     newNode->InitInterior(axis, newChildren);
     return newNode;
@@ -3221,20 +3265,18 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 int dim = curCentroidBounds.MaxDimension();
                 // Compute Splits on local subset
                 //  Allocate _BVHSplitBucket_ for SAH partition buckets
-                constexpr int nBuckets = 12;
                 BVHSplitBucket buckets[nBuckets];
                 // Initialize _BVHSplitBucket_ for SAH partition buckets
                 for (const auto &prim : currentPrimitives) {
                     int b = nBuckets * curCentroidBounds.Offset(prim.Centroid())[dim];
                     if (b == nBuckets)
                         b = nBuckets - 1;
-                    DCHECK_GE(b, 0);
-                    DCHECK_LT(b, nBuckets);
+                    CHECK_GE(b, 0);
+                    CHECK_LT(b, nBuckets);
                     buckets[b].count++;
                     buckets[b].bounds = Union(buckets[b].bounds, prim.bounds);
                 }
                 // Compute costs for splitting after each bucket
-                constexpr int nSplits = nBuckets - 1;
                 BVHSplitBucket bucketsBelow[nSplits];
                 BVHSplitBucket bucketsAbove[nSplits];
 
