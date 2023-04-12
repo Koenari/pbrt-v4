@@ -168,7 +168,6 @@ class EightWideBVHAggregate : public WideBVHAggregate {
     int flattenBVH(EightWideBVHBuildNode *node, int *offset);
     static int traversalIdx(int dirIsNeg[3],const SIMDEightWideLinearBVHNode *node, int idx);
     // FourWideBVHAggregate Private Members
-    Bounds3f bounds;
     SIMDEightWideLinearBVHNode *nodes = nullptr;
     // pre computed traversal order for all combinations of axis being negative
     static constexpr uint8_t traversalOrderArr[2][2][2][2][2][2][2][8] = {};
