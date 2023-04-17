@@ -822,7 +822,7 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
     if (idx >= count || bucket == NULL)
         return 0.f;
     Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
-    if (splitMethod == SplitMethod::EPO) {
+    if (splitMethod == SplitMethod::EPO && epoRatio > 0) {
         Bounds3f overlap;
         for (int j = 0; j < count; ++j) {
             if (j == idx || !(buckets[j]))
@@ -831,8 +831,9 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
             if (!curOverlap.IsEmpty())
                 overlap = Union(overlap,curOverlap);
         }
-        if (!overlap.IsEmpty())
-            prob *= (1.f + epoRatio * overlap.Volume() / combinedBounds.Volume());
+        if (!overlap.IsEmpty()) {
+            prob += epoRatio * overlap.SurfaceArea() / combinedBounds.SurfaceArea();
+        }
     }
     return prob;
 }
