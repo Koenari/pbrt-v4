@@ -70,8 +70,8 @@ class BVHAggregate {
     virtual Bounds3f Bounds() const = 0;
     virtual pstd::optional<ShapeIntersection> Intersect(const Ray &ray, Float tMax) const = 0;
     virtual bool IntersectP(const Ray &ray, Float tMax) const = 0;
-
-    protected:
+    bool metricsEnabled;
+  protected:
     BVHAggregate(int maxPrimsInNode, std::vector<Primitive> p, SplitMethod splitMethod,
                  Float epoRatio);
     int maxPrimsInNode;
@@ -172,8 +172,6 @@ class EightWideBVHAggregate : public WideBVHAggregate {
     static int traversalIdx(int dirIsNeg[3],const SIMDEightWideLinearBVHNode *node, int idx);
     // FourWideBVHAggregate Private Members
     SIMDEightWideLinearBVHNode *nodes = nullptr;
-    // pre computed traversal order for all combinations of axis being negative
-    static constexpr uint8_t traversalOrderArr[2][2][2][2][2][2][2][8] = {};
     // pre computed index of the most relevant split axis between two child nodes
     static constexpr int8_t relevantAxisIdxArr[8][8] = {
         {-1, 0, 1, 1, 3, 3, 3, 3},
@@ -187,7 +185,7 @@ class EightWideBVHAggregate : public WideBVHAggregate {
     };
 };
 // BinBVHAggregate Definition
-class BinBVHAggregate : BVHAggregate {
+class BinBVHAggregate : public BVHAggregate {
   public:
     // BinBVHAggregate Public Methods
     BinBVHAggregate(std::vector<Primitive> p, int maxPrimsInNode = 1,

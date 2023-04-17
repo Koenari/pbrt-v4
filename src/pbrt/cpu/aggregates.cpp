@@ -20,8 +20,6 @@
 #include <chrono>
 
 namespace pbrt {
-bool BVHEnableMetrics = true;
-
 STAT_MEMORY_COUNTER("Memory/BVH Memory", treeBytes);
 //Tree Creation
 STAT_RATIO("BVH Creation/Count Primitives per leaf", totalPrimitives, totalLeafNodes);
@@ -130,24 +128,24 @@ struct BVHPrimitive {
 //Binary BVHBuildNode Definition
 struct BVHBuildNode : ICostCalcable {
     // BVHBuildNode Public Methods
-    void InitLeaf(int first, int n, const Bounds3f &b) {
+    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = nullptr;
-        if (BVHEnableMetrics) {
+        if (enableMetrics) {
             ++totalLeafNodes;
             totalPrimitives += n;
         }
     }
 
-    void InitInterior(int axis, BVHBuildNode *c0, BVHBuildNode *c1) {
+    void InitInterior(int axis, BVHBuildNode *c0, BVHBuildNode *c1, bool enableMetrics) {
         children[0] = c0;
         children[1] = c1;
         bounds = Union(c0->bounds, c1->bounds);
         splitAxis = axis;
         nPrimitives = 0;
-        if (BVHEnableMetrics)
+        if (enableMetrics)
             ++interiorNodes;
     }
 
@@ -176,18 +174,18 @@ struct WideBVHBuildNode : ICostCalcable {
 };
 // Wide BVHBuildNote defintion with 4 children
 struct FourWideBVHBuildNode : WideBVHBuildNode {
-    void InitLeaf(int first, int n, const Bounds3f &b) {
+    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = nullptr;
-        if (BVHEnableMetrics) {
+        if (enableMetrics) {
             ++totalLeafNodes;
             totalPrimitives += n;
         }
     }
 
-    void InitInterior(int a[3], FourWideBVHBuildNode *c[4]) {
+    void InitInterior(int a[3], FourWideBVHBuildNode *c[4], bool enableMetrics) {
         children[0] = c[0];
         children[1] = c[1];
         children[2] = c[2];
@@ -195,14 +193,14 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
         for (int i = 0; i < 4; ++i) {
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else if (BVHEnableMetrics)
+            else if (enableMetrics)
                 emptyNodes++;
         }
         splitAxis[0] = a[0];
         splitAxis[1] = a[1];
         splitAxis[2] = a[2];
         nPrimitives = 0;
-        if (BVHEnableMetrics) {
+        if (enableMetrics) {
             totalNodes += 4;
             ++interiorNodes;
         }
@@ -241,30 +239,30 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
 struct EightWideBVHBuildNode : WideBVHBuildNode {
     EightWideBVHBuildNode *children[8];
     int splitAxis[7];
-    void InitLeaf(int first, int n, const Bounds3f &b) {
+    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = children[4] =
             children[5] = children[6] = children[7] = nullptr;
-        if (BVHEnableMetrics) {
+        if (enableMetrics) {
             ++totalLeafNodes;
             totalPrimitives += n;
         }
     }
 
-    void InitInterior(int a[7], EightWideBVHBuildNode *c[8]) {
+    void InitInterior(int a[7], EightWideBVHBuildNode *c[8], bool enableMetrics) {
         for (int i = 0; i < 8; ++i) {
             children[i] = c[i];
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else if (BVHEnableMetrics)
+            else if (enableMetrics)
                 emptyNodes++;
             if (i < 7)
                 splitAxis[0] = a[0];
         }
         nPrimitives = 0;
-        if (BVHEnableMetrics) {
+        if (enableMetrics) {
             totalNodes += 8;
             ++interiorNodes;
         }
@@ -367,7 +365,8 @@ BVHAggregate::BVHAggregate(int maxPrimsInNode, std::vector<Primitive> prims,
     : maxPrimsInNode(maxPrimsInNode),
       primitives(prims),
       splitMethod(sm),
-      epoRatio(epoRatio) {}
+      epoRatio(epoRatio),
+      metricsEnabled(true){}
 WideBVHAggregate::WideBVHAggregate(int TreeWidth, int maxPrimsInNode, std::vector<Primitive> prims,
                                    SplitMethod sm, Float epoRatio)
     : BVHAggregate(maxPrimsInNode, prims, sm, epoRatio), TreeWidth(TreeWidth) {}
@@ -465,14 +464,13 @@ FourWideBVHAggregate::FourWideBVHAggregate(std::vector<Primitive> prims,
     // Build BVH according to selected _splitMethod_
     auto start = std::chrono::high_resolution_clock::now();
     if (method == CreationMethod::FromBVH) {
-        BVHEnableMetrics = false;
         BinBVHAggregate *binTree =
             new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod, epoRatio, true);
+        binTree->metricsEnabled = false;
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
             &orderedPrimsOffset, orderedPrims);
         totalNodesLocal = 0;
-        BVHEnableMetrics = true;
         root = collapseBinBVH(binRoot, &totalNodesLocal, collapseVariant);
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
@@ -549,14 +547,13 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     std::atomic<int> orderedPrimsOffset{0};
     auto start = std::chrono::high_resolution_clock::now();
     if (method == CreationMethod::FromBVH) {
-        BVHEnableMetrics = false;
         BinBVHAggregate *binTree =
             new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod, epoRatio, true);
+        binTree->metricsEnabled = false;
         BVHBuildNode *binRoot = binTree->buildRecursive(
             threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
             &orderedPrimsOffset, orderedPrims);
         totalNodesLocal = 0;
-        BVHEnableMetrics = true;
         root = collapseBinBVH(binRoot, &totalNodesLocal, collapseVariant);
     } else {
         root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
@@ -1288,7 +1285,7 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
         return node;
 
     } else {
@@ -1306,7 +1303,7 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
             return node;
 
         } else {
@@ -1430,7 +1427,8 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                             int index = bvhPrimitives[i].primitiveIndex;
                             orderedPrims[firstPrimOffset + i] = primitives[index];
                         }
-                        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+                        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
+                                       metricsEnabled);
                         return node;
                     }
                 }
@@ -1464,7 +1462,7 @@ BVHBuildNode *BinBVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllo
                                    totalNodes, orderedPrimsOffset, orderedPrims);
             }
 
-            node->InitInterior(dim, children[0], children[1]);
+            node->InitInterior(dim, children[0], children[1], metricsEnabled);
         }
     }
 
@@ -1552,7 +1550,7 @@ BVHBuildNode *BinBVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
             orderedPrims[firstPrimOffset + i] = primitives[primitiveIndex];
             bounds = Union(bounds, bvhPrimitives[primitiveIndex].bounds);
         }
-        node->InitLeaf(firstPrimOffset, nPrimitives, bounds);
+        node->InitLeaf(firstPrimOffset, nPrimitives, bounds, metricsEnabled);
         return node;
 
     } else {
@@ -1583,7 +1581,7 @@ BVHBuildNode *BinBVHAggregate::emitLBVH(BVHBuildNode *&buildNodes,
                      nPrimitives - splitOffset, totalNodes, orderedPrims,
                      orderedPrimsOffset, bitIndex - 1)};
         int axis = bitIndex % 3;
-        node->InitInterior(axis, lbvh[0], lbvh[1]);
+        node->InitInterior(axis, lbvh[0], lbvh[1], metricsEnabled);
         return node;
     }
 }
@@ -1701,7 +1699,7 @@ BVHBuildNode *BinBVHAggregate::buildUpperSAH(Allocator alloc,
     CHECK_LT(mid, end);
     node->InitInterior(dim,
                        this->buildUpperSAH(alloc, treeletRoots, start, mid, totalNodes),
-                       this->buildUpperSAH(alloc, treeletRoots, mid, end, totalNodes));
+        this->buildUpperSAH(alloc, treeletRoots, mid, end, totalNodes), metricsEnabled);
     return node;
 }
 Float BinBVHAggregate::calcMetrics(BVHBuildNode *root) const { 
@@ -1862,7 +1860,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
                                                          int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         FourWideBVHBuildNode *leaf = new FourWideBVHBuildNode();
-        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds, metricsEnabled);
         return leaf;
     }
     FourWideBVHBuildNode *children[4]{};
@@ -1896,7 +1894,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
     }
     ++*totalNodes;
     FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
-    node->InitInterior(axis, children);
+    node->InitInterior(axis, children, metricsEnabled);
     return node;
 };
 FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
@@ -1920,7 +1918,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
         return node;
 
     } else {
@@ -1938,7 +1936,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
             return node;
         }
         // Cut in 4
@@ -2177,7 +2175,8 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         int index = bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
                     }
-                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
+                                   metricsEnabled);
                     return node;
                 }
             } break;
@@ -2449,7 +2448,8 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         int index = bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
                     }
-                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
+                                   metricsEnabled);
                     return node;
                 }
                 auto midIter = std::partition(
@@ -2561,7 +2561,8 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                                 int index = currentPrimitives[i].primitiveIndex;
                                 orderedPrims[firstPrimOffset + i] = primitives[index];
                             }
-                            node->InitLeaf(firstPrimOffset, count, bounds);
+                            node->InitLeaf(firstPrimOffset, count, bounds,
+                                           metricsEnabled);
                             return node;
                         }
                     }
@@ -2615,7 +2616,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
             }
         }
         ++*totalNodes;
-        node->InitInterior(axis, children);
+        node->InitInterior(axis, children, metricsEnabled);
         return node;
     }
 }
@@ -2807,7 +2808,8 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
                                                            std::atomic<int> *totalNodes, int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         EightWideBVHBuildNode *leaf = new EightWideBVHBuildNode();
-        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds,
+                       metricsEnabled);
         return leaf;
     }
     EightWideBVHBuildNode *newChildren[8]{NULL};
@@ -2859,7 +2861,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
     }
     EightWideBVHBuildNode *newNode = new EightWideBVHBuildNode();
     ++*totalNodes;
-    newNode->InitInterior(axis, newChildren);
+    newNode->InitInterior(axis, newChildren, metricsEnabled);
     return newNode;
 };
 //ToDo: Finish
@@ -2884,7 +2886,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
         return node;
 
     } else {
@@ -2902,7 +2904,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
             return node;
         }
         // For simplicity only metrics with a splitCost() are allowed
@@ -3196,7 +3198,8 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                     int index = bvhPrimitives[i].primitiveIndex;
                     orderedPrims[firstPrimOffset + i] = primitives[index];
                 }
-                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
+                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
+                               metricsEnabled);
                 return node;
             }
             BVHPrimitive *iters[7];
@@ -3321,7 +3324,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                             int index = currentPrimitives[i].primitiveIndex;
                             orderedPrims[firstPrimOffset + i] = primitives[index];
                         }
-                        node->InitLeaf(firstPrimOffset, count, bounds);
+                        node->InitLeaf(firstPrimOffset, count, bounds, metricsEnabled);
                         return node;
                     }
                 }
@@ -3373,7 +3376,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             }
         }
         ++*totalNodes;
-        node->InitInterior(axis, children);
+        node->InitInterior(axis, children, metricsEnabled);
         return node;
     }
 }
