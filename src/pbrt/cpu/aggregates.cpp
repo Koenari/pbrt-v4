@@ -1211,7 +1211,6 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
         }
         return opmiziationDone;
     };
-    // Will not implement for now as there is no benefit for now
     auto mergeLeafChildren = [=](WideBVHBuildNode *parent) {
         bool opmtimizationDone = false;
         // See if any merges are benficial
@@ -1226,6 +1225,8 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 // Can only easily merge leaves with consecutive prims
                 if (child1->firstPrimOffset + child1->nPrimitives !=
                     child2->firstPrimOffset)
+                    continue;
+                if (child1->nPrimitives + child2->nPrimitives > maxPrimsInNode)
                     continue;
                 // Bounds3f newBounds = Union(child1->bounds, child2->bounds);
                 ICostCalcable *oldNodes[MaxTreeWidth];
