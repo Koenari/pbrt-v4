@@ -297,6 +297,68 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
         }
     }
 };
+// Wide BVHBuildNote defintion with 8 newChildren
+struct SixteenWideBVHBuildNode : WideBVHBuildNode {
+    SixteenWideBVHBuildNode *children[16];
+    int splitAxis[15];
+    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
+        firstPrimOffset = first;
+        nPrimitives = n;
+        bounds = b;
+        for (int i = 0; i < 16; ++i)
+            children[i] = NULL;
+        if (enableMetrics) {
+            ++totalLeafNodes;
+            totalPrimitives += n;
+        }
+    }
+
+    void InitInterior(int a[15], SixteenWideBVHBuildNode *c[16], bool enableMetrics) {
+        for (int i = 0; i < 16; ++i) {
+            children[i] = c[i];
+            if (children[i])
+                bounds = Union(bounds, children[i]->bounds);
+            else if (enableMetrics)
+                emptyNodes++;
+            if (i < 15)
+                splitAxis[0] = a[0];
+        }
+        nPrimitives = 0;
+        if (enableMetrics) {
+            totalNodes += 16;
+            ++interiorNodes;
+        }
+    }
+    int numChildren() const override {
+        int count = 0;
+        for (int i = 0; i < 16; ++i) {
+            if (children[i])
+                count++;
+        }
+        return count;
+    };
+
+    WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
+    void setChild(int idx, WideBVHBuildNode *child) override {
+        children[idx] = (SixteenWideBVHBuildNode *)child;
+    }
+    int getAxis(int idx) const override { return splitAxis[idx]; }
+    void setAxis(int idx, int axis) override { splitAxis[idx] = axis; }
+
+    int PrimCount() const override {
+        if (nPrimitives > 0) {
+            return nPrimitives;
+        } else {
+            int count = 0;
+            for (int i = 0; i < 16; ++i) {
+                if (children[i]) {
+                    count += children[i]->PrimCount();
+                }
+            }
+            return count;
+        }
+    }
+};
 #pragma endregion
 // These strcutures do not have inheritances as they are more optimized in terms of size
 // and fast memory access therefore each TreeWidth has a special struct
@@ -344,7 +406,7 @@ struct alignas(32) SIMDEightWideLinearBVHNode {
     uint16_t nPrimitives[8] = {0};
     int offsets[8];
 
-    inline uint8_t Axis0() const { return axis >> 0 & 3; }
+    inline uint8_t Axis(int idx) const { return axis >> idx & 3; }
     inline uint8_t Axis1() const { return axis >> 2 & 3; }
     inline uint8_t Axis2() const { return axis >> 4 & 3; }
     inline uint8_t Axis3() const { return axis >> 6 & 3; }
@@ -355,6 +417,19 @@ struct alignas(32) SIMDEightWideLinearBVHNode {
                                   int axis5, int axis6) const {
         return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4) + ((axis3 & 3) << 6) +
                            ((axis4 & 3) << 8) + ((axis5 & 3) << 10) + ((axis6 & 3) << 12);
+    }
+};
+struct alignas(32) SIMDSixteenWideLinearBVHNode {
+    uint32_t axis = 0;
+    Bounds3f bounds[16];
+    uint16_t nPrimitives[16] = {0};
+    int offsets[16];
+    inline uint8_t Axis(int idx) const { return axis >> idx * 2 & 3; }
+    inline uint32_t ConstructAxis(int axis[15]) const {
+        uint32_t result = 0;
+        for (int i = 0; i < 16; ++i)
+            result |= ((axis[i] & 3) << (2 * i));
+        return result;
     }
 };
 #pragma endregion
@@ -596,6 +671,92 @@ EightWideBVHAggregate::EightWideBVHAggregate(std::vector<Primitive> prims,
     flattenBVH(root, &offset);
     CHECK_EQ(totalNodesLocal.load(), offset);
 }
+SixteenWideBVHAggregate::SixteenWideBVHAggregate(std::vector<Primitive> prims,
+                                             int maxPrimsInNode, SplitMethod splitMethod,
+                                             Float epoRatio, int splitVariant,
+                                             CreationMethod method,
+                                             OptimizationStrategy opti,
+                                             int collapseVariant)
+    : WideBVHAggregate(16, std::min(255, maxPrimsInNode), std::move(prims), splitMethod,
+                       epoRatio) {
+    CHECK(!primitives.empty());
+    LOG_VERBOSE("Creating 16 WideBVHAggregate: SPlitmethod %d (%d) - %s - %s",
+                (int)splitMethod, splitVariant,
+                method == CreationMethod::Direct ? "direct" : "fromBVH",
+                opti != None ? std::to_string(opti) : "no opti");
+    // Build BVH from _primitives_
+    // Initialize _bvhPrimitives_ array for primitives
+    std::vector<BVHPrimitive> bvhPrimitives(primitives.size());
+    for (size_t i = 0; i < primitives.size(); ++i)
+        bvhPrimitives[i] = BVHPrimitive(i, primitives[i].Bounds());
+
+    // Build BVH for primitives using _bvhPrimitives_
+    // Declare _Allocator_s used for BVH construction
+    pstd::pmr::monotonic_buffer_resource resource;
+    Allocator alloc(&resource);
+    using Resource = pstd::pmr::monotonic_buffer_resource;
+    std::vector<std::unique_ptr<Resource>> threadBufferResources;
+    ThreadLocal<Allocator> threadAllocators([&threadBufferResources]() {
+        threadBufferResources.push_back(std::make_unique<Resource>());
+        auto ptr = threadBufferResources.back().get();
+        return Allocator(ptr);
+    });
+    std::vector<Primitive> orderedPrims(primitives.size());
+    SixteenWideBVHBuildNode *root;
+    std::atomic<int> totalNodesLocal{0};
+    std::atomic<int> orderedPrimsOffset{0};
+    auto start = std::chrono::high_resolution_clock::now();
+    if (method == CreationMethod::FromBVH) {
+        BinBVHAggregate *binTree =
+            new BinBVHAggregate(primitives, maxPrimsInNode, splitMethod, epoRatio, true);
+        binTree->metricsEnabled = false;
+        BVHBuildNode *binRoot = binTree->buildRecursive(
+            threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives), &totalNodesLocal,
+            &orderedPrimsOffset, orderedPrims);
+        totalNodesLocal = 0;
+        root = collapseBinBVH(binRoot, &totalNodesLocal, collapseVariant);
+    } else {
+        root = buildRecursive(threadAllocators, pstd::span<BVHPrimitive>(bvhPrimitives),
+                              &totalNodesLocal, &orderedPrimsOffset, orderedPrims,
+                              splitVariant);
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    // Build BVH according to selected _splitMethod_
+
+    CHECK_EQ(orderedPrimsOffset.load(), orderedPrims.size());
+
+    primitives.swap(orderedPrims);
+    // Convert BVH into compact representation in _nodes_ array
+    bvhPrimitives.resize(0);
+    LOG_VERBOSE(
+        "WideBVH created with %d nodes for %d primitives (%.2f MB)",
+        totalNodesLocal.load(), (int)primitives.size(),
+                totalNodesLocal.load() * sizeof(SIMDSixteenWideLinearBVHNode) /
+                    (1024.f * 1024.f));
+    LOG_VERBOSE("Creation took: %d ms", time.count());
+    start = std::chrono::high_resolution_clock::now();
+    if (optimizeTree(root, &totalNodesLocal, opti)) {
+        end = std::chrono::high_resolution_clock::now();
+        time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        LOG_VERBOSE("WideBVH optimized to %d nodes for %d primitives (%.2f MB)",
+                    totalNodesLocal.load(), (int)primitives.size(),
+                    totalNodesLocal.load() * sizeof(SIMDSixteenWideLinearBVHNode) /
+                        (1024.f * 1024.f));
+        LOG_VERBOSE("Optimization took: %d ms", time.count());
+    }
+    Float treeCost = calcMetrics(root, 0);
+    LOG_VERBOSE("Calulated cost for BVH is: %.3f", treeCost);
+    // Root is leaf
+    if (totalNodesLocal == 0)
+        totalNodesLocal++;
+    treeBytes += totalNodesLocal * sizeof(SIMDSixteenWideLinearBVHNode) + sizeof(*this) +
+                 primitives.size() * sizeof(primitives[0]);
+    nodes = new SIMDSixteenWideLinearBVHNode[totalNodesLocal];
+    int offset = 0;
+    flattenBVH(root, &offset);
+    CHECK_EQ(totalNodesLocal.load(), offset);
+}
 #pragma endregion
 
 #pragma region BVH_STATIC_CREATE
@@ -617,6 +778,9 @@ Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prim
         case 8:
             localName = "widebvh8";
             break;
+        case 16:
+            localName = "widebvh16";
+            break;
         default:
             break;
         }
@@ -625,6 +789,8 @@ Primitive CreateAccelerator(const std::string &name, std::vector<Primitive> prim
         accel = FourWideBVHAggregate::Create(std::move(prims), parameters);
     else if (localName == "widebvh8")
         accel = EightWideBVHAggregate::Create(std::move(prims), parameters);
+    else if (localName == "widebvh16")
+        accel = SixteenWideBVHAggregate::Create(std::move(prims), parameters);
     else if (localName == "binbvh")
         accel = BinBVHAggregate::Create(std::move(prims), parameters);
     else if (localName == "kdtree")
@@ -807,7 +973,82 @@ EightWideBVHAggregate *EightWideBVHAggregate::Create(
     if (epoRatioOverride >= 0)
         epoRatio = epoRatioOverride;
     return new EightWideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,
-                                     epoRatio, splitVariant, creationMethod, optiStrat,collapseVariant);
+                                     epoRatio, splitVariant, creationMethod, optiStrat,
+                                     collapseVariant);
+}
+SixteenWideBVHAggregate *SixteenWideBVHAggregate::Create(
+        std::vector<Primitive> prims, const ParameterDictionary &parameters) {
+        std::string splitMethodName = parameters.GetOneString("splitmethod", "sah");
+        if (!splitMethodOverride.empty())
+            splitMethodName = splitMethodOverride;
+        SplitMethod splitMethod;
+        if (splitMethodName == "sah")
+            splitMethod = SplitMethod::SAH;
+        else if (splitMethodName == "epo")
+            splitMethod = SplitMethod::EPO;
+        else if (splitMethodName == "hlbvh")
+            splitMethod = SplitMethod::HLBVH;
+        else if (splitMethodName == "middle")
+            splitMethod = SplitMethod::Middle;
+        else if (splitMethodName == "equal")
+            splitMethod = SplitMethod::EqualCounts;
+        else {
+            Warning(R"(WideBVH split method "%s" unknown.  Using "sah".)",
+                    splitMethodName);
+            splitMethod = SplitMethod::SAH;
+        }
+        std::string creationMethodName =
+            parameters.GetOneString("creationmethod", "direct");
+        CreationMethod creationMethod;
+        if (!creationMethodOverride.empty())
+            creationMethodName = creationMethodOverride;
+        if (creationMethodName == "direct")
+            creationMethod = CreationMethod::Direct;
+        else if (creationMethodName == "frombvh")
+            creationMethod = CreationMethod::FromBVH;
+        else {
+            Warning(R"(WideBVH creation method "%s" unknown.  Using "direct".)",
+                    splitMethodName);
+            creationMethod = CreationMethod::Direct;
+        }
+        OptimizationStrategy optiStrat = None;
+        auto optiNames = parameters.GetStringArray("optimizations");
+        if (!optimizationStrategyOverride.empty()) {
+            optiNames.clear();
+            optiNames.push_back(optimizationStrategyOverride);
+        }
+        for each (auto optiName in optiNames) {
+            if (optiName == "all") {
+                optiStrat = All;
+                break;
+            } else if (optiName == "none") {
+                optiStrat = None;
+                break;
+            } else if (optiName == "mergeInnerChildren") {
+                optiStrat = (OptimizationStrategy)(optiStrat | MergeInnerChildren);
+            } else if (optiName == "mergeIntoParent") {
+                optiStrat = (OptimizationStrategy)(optiStrat | MergeIntoParent);
+            } else if (optiName == "mergeLeaves") {
+                optiStrat = (OptimizationStrategy)(optiStrat | MergeLeaves);
+            } else {
+                Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
+            }
+        };
+        int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
+        if (maxPrimsInNodeOverride > 0)
+            maxPrimsInNode = maxPrimsInNodeOverride;
+        int splitVariant = parameters.GetOneInt("splitVariant", 0);
+        if (splitVariantOverride >= 0)
+            splitVariant = splitVariantOverride;
+        int collapseVariant = parameters.GetOneInt("collapseVariant", 0);
+        if (collapseVariantOverride >= 0)
+            collapseVariant = collapseVariantOverride;
+        Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
+        if (epoRatioOverride >= 0)
+            epoRatio = epoRatioOverride;
+        return new SixteenWideBVHAggregate(std::move(prims), maxPrimsInNode, splitMethod,
+                                         epoRatio, splitVariant, creationMethod,
+                                         optiStrat, collapseVariant);
 }
 #pragma endregion
 
@@ -873,17 +1114,27 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
         }
         //Own box intersection cost
         Float cost = RelativeInnerCost * pstd::ceil(TreeWidth / (Float)SimdWidth);
-        for (int i = 0; i < TreeWidth; ++i) {
-            if (!(root->getChild(i)))
-                continue;
-            cost += penalizedHitProbability(i, TreeWidth, nodes, root->bounds) *
-                    calcMetrics(root->getChild(i), depth + 1);
+        if (depth < 2) {
+            ParallelFor(0, TreeWidth, [&](int i) {
+                if (root->getChild(i))
+                    cost += penalizedHitProbability(i, TreeWidth, nodes, root->bounds) *
+                        calcMetrics(root->getChild(i), depth + 1);
+                });
+        } else {
+            for (int i = 0; i < TreeWidth; ++i) {
+                if (!(root->getChild(i)))
+                    continue;
+                cost += penalizedHitProbability(i, TreeWidth, nodes, root->bounds) *
+                        calcMetrics(root->getChild(i), depth + 1);
+            }
         }
         return cost;
     }
 }
 bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *totalNodes,
                                     OptimizationStrategy strat) {
+    if (strat == None)
+        return false;
     bool didOptimize = false;
     auto mergeChildIntoParent = [=](WideBVHBuildNode *parent) {
         bool opmiziationDone = false;
@@ -3427,22 +3678,517 @@ int EightWideBVHAggregate::flattenBVH(EightWideBVHBuildNode *node, int *offset) 
 int EightWideBVHAggregate::traversalIdx(int dirIsNeg[3],
                                         const SIMDEightWideLinearBVHNode *node, int idx) {
     int res = 0;  
-    res |= ((idx & 4) ^ (dirIsNeg[node->Axis3()] << 2));
+    res |= ((idx & 4) ^ (dirIsNeg[node->Axis(3)] << 2));
     int bit2 = (res >> 2) & 1;
     res |= ((idx & 2) ^
-           (((dirIsNeg[node->Axis1()] & (1-bit2)) | (dirIsNeg[node->Axis5()] & bit2))<<1));
+           (((dirIsNeg[node->Axis(1)] & (1-bit2)) | (dirIsNeg[node->Axis(5)] & bit2))<<1));
     int bit1 = (res >> 1) & 1;
     res |=
         ((idx & 1) ^
-            ((((dirIsNeg[node->Axis0()] & (1-bit1)) | (dirIsNeg[node->Axis2()] & bit1)) &
+            ((((dirIsNeg[node->Axis(0)] & (1-bit1)) | (dirIsNeg[node->Axis(2)] & bit1)) &
              (1-bit2)) |
-        (((dirIsNeg[node->Axis4()] & (1-bit1)) | (dirIsNeg[node->Axis6()] & bit1)) & bit2)));
+        (((dirIsNeg[node->Axis(4)] & (1-bit1)) | (dirIsNeg[node->Axis(6)] & bit1)) & bit2)));
     //res += idx & 4;
     CHECK_GE(res, 0);
     CHECK_LE(res, 7);
     return res;
 }
 #pragma endregion
+
+#pragma region BvhSixteen
+// vfuncs BVH
+pstd::optional<ShapeIntersection> SixteenWideBVHAggregate::Intersect(const Ray &ray,
+                                                                   Float tMax) const {
+    pstd::optional<ShapeIntersection> si;
+    Vector3f invDir(1 / ray.d.x, 1 / ray.d.y, 1 / ray.d.z);
+    int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
+    if (!nodes)
+        return {};
+    // Follow ray through BVH nodes to find primitive intersections
+    int toVisitOffset = 0, currentNodeIndex = 0;
+    std::vector<int> nodesToVisit(128);
+    int nodesVisited = 0;
+    int simdNodesVisited = 0;
+    int simdTriangleTests = 0;
+    int triangleTests = 0;
+    int leavesTested = 0;
+    int leavesHit = 0;
+    int interiorTested = 0;
+    int interiorHit = 0;
+    while (true) {
+        simdNodesVisited += std::ceil(TreeWidth / (float)SimdWidth);
+        const SIMDSixteenWideLinearBVHNode *node = &nodes[currentNodeIndex];
+        for (int i = 0; i < TreeWidth; ++i) {
+            int idx = traversalIdx(dirIsNeg, node, i);
+            if (node->offsets[idx] < 0)
+                continue;
+            ++nodesVisited;
+            if (node->nPrimitives[idx] > 0) {
+                leavesTested++;
+            } else {
+                interiorTested++;
+            }
+            if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+                // Leaf oldChild
+                if (node->nPrimitives[idx] > 0) {
+                    leavesHit++;
+                    bvhAvgLeaveSizeHit << (int)(node->nPrimitives[idx]);
+                    simdTriangleTests +=
+                        pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
+                    triangleTests += node->nPrimitives[idx];
+                    // Intersect ray with primitives in leaf BVH newNode
+                    for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
+                        // Check for intersection with primitive in BVH newNode
+                        pstd::optional<ShapeIntersection> primSi =
+                            primitives[node->offsets[idx] + j].Intersect(ray, tMax);
+                        if (primSi) {
+                            si = primSi;
+                            tMax = si->tHit;
+                        }
+                    }
+                }
+                // Interior oldChild
+                else {
+                    interiorHit++;
+                    nodesToVisit[toVisitOffset++] = node->offsets[idx];
+                }
+            }
+        }
+        if (toVisitOffset == 0)
+            break;
+        currentNodeIndex = nodesToVisit[--toVisitOffset];
+    }
+    bvhSimdTriangleTests += simdTriangleTests;
+    bvhSimdNodesVisited += simdNodesVisited;
+    bvhSisdNodesVisited += nodesVisited;
+    bvhSisdTriangleTests += triangleTests;
+    bvhInteriorHit += interiorHit;
+    bvhInteriorTested += interiorTested;
+    bvhLeavesHit += leavesHit;
+    bvhLeavesTested += leavesTested;
+    return si;
+}
+bool SixteenWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
+    pstd::optional<ShapeIntersection> si;
+    Vector3f invDir(1 / ray.d.x, 1 / ray.d.y, 1 / ray.d.z);
+    int dirIsNeg[3] = {int(invDir.x < 0), int(invDir.y < 0), int(invDir.z < 0)};
+    if (!nodes)
+        return false;
+    // Follow ray through BVH nodes to find primitive intersections
+    int toVisitOffset = 0, currentNodeIndex = 0;
+    std::vector<int> nodesToVisit(64);
+    int nodesVisited = 0;
+    int simdNodesVisited = 0;
+    int simdTriangleTests = 0;
+    int triangleTests = 0;
+    int leavesTested = 0;
+    int leavesHit = 0;
+    int interiorTested = 0;
+    int interiorHit = 0;
+    while (true) {
+        simdNodesVisited += std::ceil(TreeWidth / (float)SimdWidth);
+        const SIMDSixteenWideLinearBVHNode *node = &nodes[currentNodeIndex];
+        for (int i = 0; i < TreeWidth; ++i) {
+            int idx = traversalIdx(dirIsNeg, node, i);
+            if (node->offsets[idx] < 0)
+                continue;
+            ++nodesVisited;
+            if (node->nPrimitives[idx] > 0) {
+                leavesTested++;
+            } else {
+                interiorTested++;
+            }
+            if (node->bounds[idx].IntersectP(ray.o, ray.d, tMax, invDir, dirIsNeg)) {
+                // Leaf oldChild
+                if (node->nPrimitives[idx] > 0) {
+                    leavesHit++;
+                    bvhAvgLeaveSizeHit << (int)(node->nPrimitives[idx]);
+                    simdTriangleTests +=
+                        pstd::ceil(node->nPrimitives[idx] / (float)SimdWidth);
+                    triangleTests += node->nPrimitives[idx];
+                    // Intersect ray with primitives in leaf BVH newNode
+                    for (size_t j = 0; j < node->nPrimitives[idx]; ++j) {
+                        // Check for intersection with primitive in BVH newNode
+                        if (primitives[node->offsets[idx] + j].IntersectP(ray, tMax))
+                            return true;
+                    }
+                }
+                // Interior oldChild
+                else {
+                    interiorHit++;
+                    nodesToVisit[toVisitOffset++] = node->offsets[idx];
+                }
+            }
+        }
+        if (toVisitOffset == 0)
+            break;
+        currentNodeIndex = nodesToVisit[--toVisitOffset];
+    }
+    bvhSimdTriangleTests += simdTriangleTests;
+    bvhSimdNodesVisited += simdNodesVisited;
+    bvhSisdNodesVisited += nodesVisited;
+    bvhSisdTriangleTests += triangleTests;
+    bvhInteriorHit += interiorHit;
+    bvhInteriorTested += interiorTested;
+    bvhLeavesHit += leavesHit;
+    bvhLeavesTested += leavesTested;
+    return false;
+}
+//vfuncs WideBVH
+int8_t SixteenWideBVHAggregate::relevantAxisIdx(int a1, int a2) const {
+    //max = 1111
+    int result = 0;
+    int different = a1 ^ a2;
+    int same = a1 & a2;
+    int toTest = 0b1000;
+    while (toTest > 0) {
+        if (different & toTest) {
+            return result + (toTest-1);
+        }
+        result |= (a1 & toTest);
+        toTest >>= 1;
+    }
+    return -1;
+}
+int SixteenWideBVHAggregate::traversalIdx(int dirIsNeg[3],
+                                        const SIMDSixteenWideLinearBVHNode *node, int idx) {
+    int res = 0;
+    res |= ((idx & 8) ^ (dirIsNeg[node->Axis(res + 7)] << 3));
+    res |= ((idx & 4) ^ (dirIsNeg[node->Axis(res + 3)] << 2));
+    res |= ((idx & 2) ^ (dirIsNeg[node->Axis(res + 1)] << 1));
+    res |= ((idx & 1) ^ (dirIsNeg[node->Axis(res + 0)] << 0));
+    CHECK_GE(res, 0);
+    CHECK_LE(res, 15);
+    return res;
+}
+
+SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
+    BVHBuildNode *binRoot, std::atomic<int> *totalNodes,
+    int collapseVariant) {
+    if (binRoot->nPrimitives > 0) {
+        SixteenWideBVHBuildNode *leaf = new SixteenWideBVHBuildNode();
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds,
+                       metricsEnabled);
+        return leaf;
+    }
+    SixteenWideBVHBuildNode *newChildren[16]{NULL};
+    int axis[15]{};
+    switch (collapseVariant) {
+    case 1:
+        axis[0] = binRoot->splitAxis;
+        newChildren[0] =
+            collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        newChildren[1] =
+            collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        break;
+    default:
+        axis[7] = binRoot->splitAxis;
+        BVHBuildNode *children[4];
+        BVHBuildNode *grandChildren[8];
+        // First iteration (Flatten to 4 nodes)
+        for (int i = 0; i < 2; ++i) {
+            auto oldChild = binRoot->children[i];
+            axis[i * 8 + 3] = oldChild->splitAxis;
+            if (oldChild->nPrimitives > 0) {
+                children[i * 2] = oldChild;
+                children[i * 2 + 1] = NULL;
+            } else {
+                children[i * 2] = oldChild->children[0];
+                children[i * 2 + 1] = oldChild->children[1];
+            }
+        }
+        // Second iteration (Flatten to 8 nodes)
+        for (int i = 0; i < 4; ++i) {
+            auto oldChild = children[i];
+            if (!oldChild) {
+                grandChildren[i * 2] = NULL;
+                grandChildren[i * 2 + 1] = NULL;
+                continue;
+            }
+            axis[i * 2] = oldChild->splitAxis;
+            if (oldChild->nPrimitives > 0) {
+                grandChildren[i * 2] = oldChild;
+                grandChildren[i * 2 + 1] = NULL;
+            } else {
+                grandChildren[i * 2] = oldChild->children[0];
+                grandChildren[i * 2 + 1] = oldChild->children[1];
+            }
+        }
+        // merge these 8 children to 16
+        for (int i = 0; i < 8; ++i) {
+            auto oldChild = grandChildren[i];
+            if (!oldChild) {
+                newChildren[i * 2] = NULL;
+                newChildren[i * 2 + 1] = NULL;
+                continue;
+            }
+            axis[i * 2] = oldChild->splitAxis;
+            if (oldChild->nPrimitives > 0) {
+                newChildren[i * 2] =
+                    collapseBinBVH(oldChild, totalNodes, collapseVariant);
+                newChildren[i * 2 + 1] = NULL;
+            } else {
+                newChildren[i * 2] =
+                    collapseBinBVH(oldChild->children[0], totalNodes, collapseVariant);
+                newChildren[i * 2 + 1] =
+                    collapseBinBVH(oldChild->children[1], totalNodes, collapseVariant);
+            }
+        }
+        break;
+    }
+    SixteenWideBVHBuildNode *newNode = new SixteenWideBVHBuildNode();
+    ++*totalNodes;
+    newNode->InitInterior(axis, newChildren, metricsEnabled);
+    return newNode;
+}
+SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
+    ThreadLocal<Allocator> &threadAllocators, pstd::span<BVHPrimitive> bvhPrimitives,
+    std::atomic<int> *totalNodes, std::atomic<int> *orderedPrimsOffset,
+    std::vector<Primitive> &orderedPrims, int splitVariant) {
+    if (bvhPrimitives.size() < 1) {
+        return nullptr;
+    }
+    Allocator alloc = threadAllocators.Get();
+    SixteenWideBVHBuildNode *node = alloc.new_object<SixteenWideBVHBuildNode>();
+    // Initialize _BVHBuildNode_ for primitive range
+    // Compute bounds of all primitives in BVH newNode
+    Bounds3f bounds;
+    for (const auto &prim : bvhPrimitives)
+        bounds = Union(bounds, prim.bounds);
+    if (bounds.SurfaceArea() == 0 || bvhPrimitives.size() < 2) {
+        // Create leaf _BVHBuildNode_
+        int firstPrimOffset = orderedPrimsOffset->fetch_add(bvhPrimitives.size());
+        for (size_t i = 0; i < bvhPrimitives.size(); ++i) {
+            int index = bvhPrimitives[i].primitiveIndex;
+            orderedPrims[firstPrimOffset + i] = primitives[index];
+        }
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+        return node;
+
+    } else {
+        // Compute bound of primitive centroids and choose split dimensions _dim_
+        int axis[15]{};
+        Bounds3f centroidBounds;
+        for (const auto &prim : bvhPrimitives)
+            centroidBounds = Union(centroidBounds, prim.Centroid());
+        axis[3] = centroidBounds.MaxDimension();
+        // Decide on Leaf or inner
+        if (centroidBounds.pMax[axis[1]] == centroidBounds.pMin[axis[1]]) {
+            // Create leaf _BVHBuildNode_
+            int firstPrimOffset = orderedPrimsOffset->fetch_add(bvhPrimitives.size());
+            for (size_t i = 0; i < bvhPrimitives.size(); ++i) {
+                int index = bvhPrimitives[i].primitiveIndex;
+                orderedPrims[firstPrimOffset + i] = primitives[index];
+            }
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+            return node;
+        }
+        // For simplicity only metrics with a splitCost() are allowed
+        CHECK(splitMethod == EPO || splitMethod == SAH);
+        // Aditioanlly we only use parts of the splitvariants
+        CHECK(splitVariant == 0 || splitVariant == 2);
+        // Cut in 8
+        constexpr size_t nBuckets = 12;
+        constexpr size_t nSplits = nBuckets - 1;
+        size_t splitPoints[17]{};
+        splitPoints[0] = 0;
+        BVHSplitBucket *proposedBuckets[16]{NULL};
+        proposedBuckets[0] = new BVHSplitBucket();
+        proposedBuckets[0]->count = bvhPrimitives.size();
+        proposedBuckets[0]->bounds = bounds;
+        splitPoints[16] = splitPoints[1] = bvhPrimitives.size();
+            // do 7 binary splits
+        for (int i = 0; i < TreeWidth-1; i++) {
+            // Consider leaf only for whole newNode
+            bool firstIteration = i == 0;
+            int mid;
+            Float highestCost = 0;
+            int bestSplit = 1;
+            // find child to split
+            for (int j = 1; j < i + 2; ++j) {
+                Float curCost =
+                    childCost(j - 1, 15, (ICostCalcable **)proposedBuckets, bounds);
+                if (curCost > highestCost) {
+                    highestCost = curCost;
+                    bestSplit = j;
+                }
+            }
+            // move splits after current one back to make space
+            for (int j = TreeWidth-2; j >= bestSplit; --j) {
+                proposedBuckets[j] = proposedBuckets[j - 1];
+                axis[j] = axis[j - 1];
+                splitPoints[j + 1] = splitPoints[j];
+            }
+            // prepare current subset to split
+            int count = splitPoints[bestSplit + 1] - splitPoints[bestSplit - 1];
+            pstd::span<BVHPrimitive> currentPrimitives =
+                bvhPrimitives.subspan(splitPoints[bestSplit - 1], count);
+            Bounds3f curCentroidBounds;
+            if (firstIteration) {
+                curCentroidBounds = centroidBounds;
+            } else {
+                for (const auto &prim : currentPrimitives)
+                    curCentroidBounds = Union(curCentroidBounds, prim.Centroid());
+            }
+            int dim = curCentroidBounds.MaxDimension();
+            // Compute Splits on local subset
+            //  Allocate _BVHSplitBucket_ for SAH partition buckets
+            BVHSplitBucket buckets[nBuckets];
+            // Initialize _BVHSplitBucket_ for SAH partition buckets
+            for (const auto &prim : currentPrimitives) {
+                int b = nBuckets * curCentroidBounds.Offset(prim.Centroid())[dim];
+                if (b == nBuckets)
+                    b = nBuckets - 1;
+                CHECK_GE(b, 0);
+                CHECK_LT(b, nBuckets);
+                buckets[b].count++;
+                buckets[b].bounds = Union(buckets[b].bounds, prim.bounds);
+            }
+            // Compute costs for splitting after each bucket
+            BVHSplitBucket bucketsBelow[nSplits];
+            BVHSplitBucket bucketsAbove[nSplits];
+
+            bucketsBelow[0].bounds = buckets[0].bounds;
+            bucketsBelow[0].count = buckets[0].count;
+            for (int i = 1; i < nSplits; ++i) {
+                bucketsBelow[i].bounds =
+                    Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
+                bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
+            }
+            // Finish initializing _costs_ using a backwards scan over splits
+
+            bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
+            bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
+            for (int i = nSplits - 1; i >= 1; --i) {
+                bucketsAbove[i - 1].bounds =
+                    Union(bucketsAbove[i].bounds, buckets[i].bounds);
+                bucketsAbove[i - 1].count = bucketsAbove[i].count + buckets[i].count;
+            }
+            // Find bucket to split at that minimizes metric
+            int minCostBucket = -1;
+            Float minCost = Infinity;
+            ICostCalcable *curBuckets[2];
+            for (int i = 0; i < nSplits; ++i) {
+                // Compute cost for candidate split and update minimum if
+                // necessary
+                curBuckets[0] = &bucketsBelow[i];
+                curBuckets[1] = &bucketsAbove[i];
+                float cost = splitCost(2, curBuckets, bounds);
+                if (cost < minCost) {
+                    minCost = cost;
+                    minCostBucket = i;
+                }
+            }
+            // Consider leaf only for first iteration
+            if (firstIteration && currentPrimitives.size() <= maxPrimsInNode) {
+                // Compute leaf cost and SAH split cost for chosen
+                minCost = RelativeInnerCost + minCost;
+                if (leafCost(count) <= minCost) {
+                    int firstPrimOffset = orderedPrimsOffset->fetch_add(count);
+                    for (size_t i = 0; i < count; ++i) {
+                        int index = currentPrimitives[i].primitiveIndex;
+                        orderedPrims[firstPrimOffset + i] = primitives[index];
+                    }
+                    node->InitLeaf(firstPrimOffset, count, bounds, metricsEnabled);
+                    return node;
+                }
+            }
+            auto midIter = std::partition(
+                currentPrimitives.begin(), currentPrimitives.end(),
+                [=](const BVHPrimitive &bp) {
+                    int b = nBuckets * curCentroidBounds.Offset(bp.Centroid())[dim];
+                    if (b == nBuckets)
+                        b = nBuckets - 1;
+                    return b <= minCostBucket;
+                });
+            mid = midIter - currentPrimitives.begin();
+
+            // Translate local split into offsets in complete bvhPrims
+            splitPoints[bestSplit] = splitPoints[bestSplit - 1] + mid;
+            axis[bestSplit - 1] = dim;
+            proposedBuckets[bestSplit - 1] = new BVHSplitBucket();
+            proposedBuckets[bestSplit - 1]->count = bucketsBelow[minCostBucket].count;
+            proposedBuckets[bestSplit - 1]->bounds =
+                bucketsBelow[minCostBucket].bounds;
+            // Can reuse old bucket here
+            proposedBuckets[bestSplit] = new BVHSplitBucket();
+            proposedBuckets[bestSplit]->count = bucketsAbove[minCostBucket].count;
+            proposedBuckets[bestSplit]->bounds = bucketsAbove[minCostBucket].bounds;
+        }
+        SixteenWideBVHBuildNode *children[MaxTreeWidth];
+        if (bvhPrimitives.size() > 128 * 1024) {
+            // Recursively build oldChild BVHs in parallel
+            ParallelFor(0, TreeWidth, [&](int i) {
+                DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
+                children[i] = buildRecursive(
+                    threadAllocators,
+                    bvhPrimitives.subspan(splitPoints[i],
+                                          splitPoints[i + 1] - splitPoints[i]),
+                    totalNodes, orderedPrimsOffset, orderedPrims, splitVariant);
+            });
+
+        } else {
+            // Recursively build oldChild BVHs sequentially
+            for (int i = 0; i < TreeWidth; i++) {
+                DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
+                children[i] = buildRecursive(
+                    threadAllocators,
+                    bvhPrimitives.subspan(splitPoints[i],
+                                          splitPoints[i + 1] - splitPoints[i]),
+                    totalNodes, orderedPrimsOffset, orderedPrims, splitVariant);
+            }
+        }
+        ++*totalNodes;
+        node->InitInterior(axis, children, metricsEnabled);
+        return node;
+    }
+}
+
+int SixteenWideBVHAggregate::flattenBVH(SixteenWideBVHBuildNode *node, int *offset) {
+    SIMDSixteenWideLinearBVHNode *linearNode = &nodes[*offset];
+    // Root newNode
+    if (*offset == 0) {
+        this->bounds = node->bounds;
+        // Root is leaf -> create interior with 1 leaf oldChild
+        if (node->nPrimitives > 0) {
+            for (int i = 0; i < TreeWidth; ++i) {
+                CHECK(!node->children[i]);
+            }
+            CHECK_LT(node->nPrimitives, 65536);
+            linearNode->bounds[0] = node->bounds;
+            linearNode->offsets[0] = node->firstPrimOffset;
+            linearNode->nPrimitives[0] = node->nPrimitives;
+            for (int i = 1; i < TreeWidth; ++i) {
+                linearNode->offsets[i] = -1;
+            }
+            (*offset)++;
+            return 1;
+        }
+    }
+    CHECK_EQ(node->nPrimitives, 0);
+    int nodeOffset = (*offset)++;
+    // Create interior flattened BVH newNode
+    linearNode->axis = linearNode->ConstructAxis(node->splitAxis);
+
+    for (int i = 0; i < TreeWidth; i++) {
+        if (node->children[i]) {
+            linearNode->bounds[i] = node->children[i]->bounds;
+            linearNode->nPrimitives[i] = node->children[i]->nPrimitives;
+            if (linearNode->nPrimitives[i] > 0) {
+                linearNode->offsets[i] = node->children[i]->firstPrimOffset;
+            } else {
+                linearNode->offsets[i] = flattenBVH(node->children[i], offset);
+            }
+
+        } else {
+            linearNode->offsets[i] = -1;
+        }
+    }
+    return nodeOffset;
+}
+
+#pragma endregion
+
 
 #pragma region KdTree
 
