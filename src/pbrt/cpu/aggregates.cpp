@@ -1064,16 +1064,23 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
         return 0.f;
     Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
     if (splitMethod == SplitMethod::EPO && epoRatio > 0) {
+        Float addedExtraVol = 0;
         Bounds3f overlap;
         for (int j = 0; j < count; ++j) {
             if (j == idx || !(buckets[j]))
                 continue;
-            Bounds3f curOverlap = pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds());
-            if (!curOverlap.IsEmpty())
-                overlap = Union(overlap,curOverlap);
+            if (Overlaps(bucket->Bounds(), buckets[j]->Bounds())) {
+                Bounds3f curOverlap =
+                    pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds());
+                overlap = Union(overlap, curOverlap);
+                addedExtraVol += curOverlap.Volume();
+            }
         }
         if (!overlap.IsEmpty()) {
-            prob *= (1+ epoRatio * overlap.Volume() / combinedBounds.Volume());
+            Float unionedExtraVol = overlap.Volume();
+            Float extraVol =
+                unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
+            prob *= (1 + epoRatio * extraVol / combinedBounds.Volume());
         }
     }
     return prob;
@@ -2822,22 +2829,23 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                             bucketsAbove[i - 1].count =
                                 bucketsAbove[i].count + buckets[i].count;
                         }
-                        // Find bucket to split at that minimizes metric
-                        int minCostBucket = -1;
-                        Float minCost = Infinity;
-                        ICostCalcable *curBuckets[MaxTreeWidth];
+                        //Fill 
+                        ICostCalcable *splitToCalc[MaxTreeWidth];
                         int curIdx = 0;
                         for (int j = 0; j < i + 1; j++) {
                             if (j == bestSplit - 1)
                                 continue;
-                            curBuckets[curIdx++] = proposedBuckets[j];
+                            splitToCalc[curIdx++] = proposedBuckets[j];
                         }
+                        int minCostBucket = -1;
+                        Float minCost = Infinity;
+                        // Find bucket to split at that minimizes metric
                         for (int j = 0; j < nSplits; ++j) {
                             // Compute cost for candidate split and update minimum if
                             // necessary
-                            curBuckets[i + 0] = &bucketsBelow[j];
-                            curBuckets[i + 1] = &bucketsAbove[j];
-                            float cost = splitCost(i + 2, curBuckets, bounds);
+                            splitToCalc[i + 0] = &bucketsBelow[j];
+                            splitToCalc[i + 1] = &bucketsAbove[j];
+                            float cost = splitCost(i + 2, splitToCalc, bounds);
                             if (cost < minCost) {
                                 minCost = cost;
                                 minCostBucket = j;
