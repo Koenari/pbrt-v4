@@ -51,15 +51,18 @@ struct LBVHTreelet {
     size_t startIndex, nPrimitives;
     BVHBuildNode *buildNodes;
 };
+//Initialize statics 
 int BVHAggregate::SimdWidth = 1;
 int BVHAggregate::collapseVariantOverride = -1;
 int BVHAggregate::WidthOverride = -1;
 int BVHAggregate::maxPrimsInNodeOverride = -1;
 int BVHAggregate::splitVariantOverride = -1;
 Float BVHAggregate::epoRatioOverride = -1;
+Float BVHAggregate::RelativeInnerCost = 1;
 std::string BVHAggregate::splitMethodOverride = std::string();
 std::string BVHAggregate::creationMethodOverride = std::string();
 std::string BVHAggregate::optimizationStrategyOverride = std::string();
+
     // BinBVHAggregate Utility Functions
 static void RadixSort(std::vector<MortonPrimitive> *v) {
     std::vector<MortonPrimitive> tempVector(v->size());
