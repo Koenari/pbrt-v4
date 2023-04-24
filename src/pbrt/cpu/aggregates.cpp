@@ -830,7 +830,7 @@ BinBVHAggregate *BinBVHAggregate::Create(std::vector<Primitive> prims,
         splitMethod = SplitMethod::SAH;
     }
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
-    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
+    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 8);
     if (maxPrimsInNodeOverride > 0)
         maxPrimsInNode = maxPrimsInNodeOverride;
     Float epoRatio = parameters.GetOneFloat("epoRatio", 1.f);
@@ -965,7 +965,7 @@ EightWideBVHAggregate *EightWideBVHAggregate::Create(
             Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
         }
     };
-    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
+    int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 32);
     if (maxPrimsInNodeOverride > 0)
         maxPrimsInNode = maxPrimsInNodeOverride;
     int splitVariant = parameters.GetOneInt("splitVariant", 0);
@@ -1039,7 +1039,7 @@ SixteenWideBVHAggregate *SixteenWideBVHAggregate::Create(
                 Warning(R"(WideBVH optimization strategy "%s" unknown.)", optiName);
             }
         };
-        int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 16);
+        int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 64);
         if (maxPrimsInNodeOverride > 0)
             maxPrimsInNode = maxPrimsInNodeOverride;
         int splitVariant = parameters.GetOneInt("splitVariant", 0);
