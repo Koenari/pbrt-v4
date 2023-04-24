@@ -3606,19 +3606,19 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
 
                 bucketsBelow[0].bounds = buckets[0].bounds;
                 bucketsBelow[0].count = buckets[0].count;
-                for (int i = 1; i < nSplits; ++i) {
-                    bucketsBelow[i].bounds =
-                        Union(bucketsBelow[i - 1].bounds, buckets[i].bounds);
-                    bucketsBelow[i].count = bucketsBelow[i - 1].count + buckets[i].count;
+                for (int j = 1; j < nSplits; ++j) {
+                    bucketsBelow[j].bounds =
+                        Union(bucketsBelow[j - 1].bounds, buckets[j].bounds);
+                    bucketsBelow[j].count = bucketsBelow[j - 1].count + buckets[j].count;
                 }
                 // Finish initializing _costs_ using a backwards scan over splits
 
                 bucketsAbove[nSplits - 1].bounds = buckets[nSplits].bounds;
                 bucketsAbove[nSplits - 1].count = buckets[nSplits].count;
-                for (int i = nSplits - 1; i >= 1; --i) {
-                    bucketsAbove[i - 1].bounds =
-                        Union(bucketsAbove[i].bounds, buckets[i].bounds);
-                    bucketsAbove[i - 1].count = bucketsAbove[i].count + buckets[i].count;
+                for (int j = nSplits - 1; j >= 1; --j) {
+                    bucketsAbove[j - 1].bounds =
+                        Union(bucketsAbove[j].bounds, buckets[j].bounds);
+                    bucketsAbove[j - 1].count = bucketsAbove[j].count + buckets[j].count;
                 }
                 // Find bucket to split at that minimizes metric
                 int minCostBucket = -1;
@@ -3666,7 +3666,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             // Consider leaf if
             if (bvhPrimitives.size() <= maxPrimsInNode) {
                 // Compute leaf cost and SAH split cost for chosen
-                if (leafCost(bvhPrimitives.size()) <=
+                if (leafCost(bvhPrimitives.size()) <= RelativeInnerCost +
                     splitCost(TreeWidth, (ICostCalcable **)proposedBuckets, bounds)) {
                     int firstPrimOffset =
                         orderedPrimsOffset->fetch_add(bvhPrimitives.size());
