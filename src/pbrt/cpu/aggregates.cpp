@@ -34,8 +34,10 @@ STAT_PIXEL_RATIO("BVH Traversal/Interior Nodes hit", bvhInteriorHit, bvhInterior
 STAT_PIXEL_RATIO("BVH Traversal/Leaf Nodes hit", bvhLeavesHit, bvhLeavesTested);
 STAT_PIXEL_COUNTER("BVH Traversal/SIMD Primitive intersections", bvhSimdTriangleTests);
 STAT_PIXEL_COUNTER("BVH Traversal/SIMD Interior Nodes visited", bvhSimdNodesVisited);
+STAT_PIXEL_COUNTER("BVH Traversal/SIMD Performance", bvhSimdPerformance);
 STAT_PIXEL_COUNTER("BVH Traversal/SISD Nodes visited", bvhSisdNodesVisited);
 STAT_PIXEL_COUNTER("BVH Traversal/SISD Primitive intersections", bvhSisdTriangleTests);
+STAT_PIXEL_COUNTER("BVH Traversal/SISD Performance", bvhSisdPerformance);
 //optimization
 STAT_COUNTER("BVH Opti/Merged Leaves", bvhOptiLeaves);
 STAT_COUNTER("BVH Opti/Merged Into Parent", bvhOptiIntoParent);
@@ -63,7 +65,7 @@ std::string BVHAggregate::splitMethodOverride = std::string();
 std::string BVHAggregate::creationMethodOverride = std::string();
 std::string BVHAggregate::optimizationStrategyOverride = std::string();
 
-    // BinBVHAggregate Utility Functions
+// BinBVHAggregate Utility Functions
 static void RadixSort(std::vector<MortonPrimitive> *v) {
     std::vector<MortonPrimitive> tempVector(v->size());
     constexpr int bitsPerPass = 6;
@@ -1468,6 +1470,8 @@ pstd::optional<ShapeIntersection> BinBVHAggregate::Intersect(const Ray &ray,
     bvhSisdNodesVisited += nodesVisited;
     bvhSimdNodesVisited += simdNodes;
     bvhSimdTriangleTests += simdTriangles;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + trianglesTested;
+    bvhSimdPerformance += RelativeInnerCost * simdNodes + simdTriangles;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
@@ -2053,6 +2057,8 @@ pstd::optional<ShapeIntersection> FourWideBVHAggregate::Intersect(const Ray &ray
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdNodesVisited += nodesVisited;
     bvhSisdTriangleTests += triangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
@@ -2111,6 +2117,8 @@ bool FourWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdTriangleTests += triangleTests;
     bvhSimdTriangleTests += simdTriangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     return false;
 }
 //vfuncs WideBVH
@@ -3055,6 +3063,8 @@ pstd::optional<ShapeIntersection> EightWideBVHAggregate::Intersect(const Ray &ra
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdNodesVisited += nodesVisited;
     bvhSisdTriangleTests += triangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
@@ -3121,6 +3131,8 @@ bool EightWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdNodesVisited += nodesVisited;
     bvhSisdTriangleTests += triangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
@@ -3842,6 +3854,8 @@ pstd::optional<ShapeIntersection> SixteenWideBVHAggregate::Intersect(const Ray &
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdNodesVisited += nodesVisited;
     bvhSisdTriangleTests += triangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
@@ -3908,6 +3922,8 @@ bool SixteenWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
     bvhSimdNodesVisited += simdNodesVisited;
     bvhSisdNodesVisited += nodesVisited;
     bvhSisdTriangleTests += triangleTests;
+    bvhSisdPerformance += RelativeInnerCost * nodesVisited + triangleTests;
+    bvhSimdPerformance += RelativeInnerCost * simdNodesVisited + simdTriangleTests;
     bvhInteriorHit += interiorHit;
     bvhInteriorTested += interiorTested;
     bvhLeavesHit += leavesHit;
