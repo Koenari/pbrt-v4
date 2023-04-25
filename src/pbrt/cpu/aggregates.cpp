@@ -391,9 +391,7 @@ struct alignas(32) SIMDFourWideLinearBVHNode {
     uint16_t nPrimitives[4] = {0};
     int offsets[4];
 
-    inline uint8_t Axis0() const { return axis >> 0 & 3; }
-    inline uint8_t Axis1() const { return axis >> 2 & 3; }
-    inline uint8_t Axis2() const { return axis >> 4 & 3; }
+    inline uint8_t Axis(int idx) const { return axis >> (idx * 2) & 3; }
     inline uint8_t ConstructAxis(int axis0, int axis1, int axis2) const {
         return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4);
     }
@@ -411,13 +409,7 @@ struct alignas(32) SIMDEightWideLinearBVHNode {
     uint16_t nPrimitives[8] = {0};
     int offsets[8];
 
-    inline uint8_t Axis(int idx) const { return axis >> idx & 3; }
-    inline uint8_t Axis1() const { return axis >> 2 & 3; }
-    inline uint8_t Axis2() const { return axis >> 4 & 3; }
-    inline uint8_t Axis3() const { return axis >> 6 & 3; }
-    inline uint8_t Axis4() const { return axis >> 8 & 3; }
-    inline uint8_t Axis5() const { return axis >> 10 & 3; }
-    inline uint8_t Axis6() const { return axis >> 12 & 3; }
+    inline uint8_t Axis(int idx) const { return axis >> (idx * 2) & 3; }
     inline uint16_t ConstructAxis(int axis0, int axis1, int axis2, int axis3, int axis4,
                                   int axis5, int axis6) const {
         return axis0 & 3 + ((axis1 & 3) << 2) + ((axis2 & 3) << 4) + ((axis3 & 3) << 6) +
@@ -429,7 +421,7 @@ struct alignas(32) SIMDSixteenWideLinearBVHNode {
     Bounds3f bounds[16];
     uint16_t nPrimitives[16] = {0};
     int offsets[16];
-    inline uint8_t Axis(int idx) const { return axis >> idx * 2 & 3; }
+    inline uint8_t Axis(int idx) const { return axis >> (idx * 2) & 3; }
     inline uint32_t ConstructAxis(int axis[15]) const {
         uint32_t result = 0;
         for (int i = 0; i < 16; ++i)
@@ -2011,8 +2003,8 @@ pstd::optional<ShapeIntersection> FourWideBVHAggregate::Intersect(const Ray &ray
         ++simdNodesVisited;
         const SIMDFourWideLinearBVHNode *node = &nodes[currentNodeIndex];
         const uint8_t *idxArr =
-            traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
-                          [dirIsNeg[node->Axis2()]];
+            traversalOrder[dirIsNeg[node->Axis(0)]][dirIsNeg[node->Axis(1)]]
+                          [dirIsNeg[node->Axis(2)]];
         for (int i = 0; i < TreeWidth; ++i) {
             uint8_t idx = idxArr[i];
             if (node->offsets[idx] < 0)
@@ -2083,8 +2075,8 @@ bool FourWideBVHAggregate::IntersectP(const Ray &ray, Float tMax) const {
         CHECK_GE(currentNodeIndex, 0);
         const SIMDFourWideLinearBVHNode *node = &nodes[currentNodeIndex];
         const uint8_t *idxArr =
-            traversalOrder[dirIsNeg[node->Axis0()]][dirIsNeg[node->Axis1()]]
-                          [dirIsNeg[node->Axis2()]];
+            traversalOrder[dirIsNeg[node->Axis(0)]][dirIsNeg[node->Axis(1)]]
+                          [dirIsNeg[node->Axis(2)]];
         for (int i = 0; i < TreeWidth; ++i) {
             uint8_t idx = idxArr[i];
             if (node->offsets[idx] < 0)
