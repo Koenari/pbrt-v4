@@ -212,6 +212,8 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
     }
     FourWideBVHBuildNode *children[4];
     int numChildren() const override {
+        if (IsLeaf())
+            return 1;
         int count = 0;
         for (int i = 0; i < 4; ++i) {
             if (children[i])
@@ -273,6 +275,8 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
         }
     }
     int numChildren() const override {
+        if (IsLeaf())
+            return 1;
         int count = 0;
         for (int i = 0; i < 8; ++i) {
             if (children[i])
@@ -335,6 +339,8 @@ struct SixteenWideBVHBuildNode : WideBVHBuildNode {
         }
     }
     int numChildren() const override {
+        if (IsLeaf())
+            return 1;
         int count = 0;
         for (int i = 0; i < 16; ++i) {
             if (children[i])
@@ -2128,18 +2134,67 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds, metricsEnabled);
         return leaf;
     }
-    FourWideBVHBuildNode *children[4]{};
+    FourWideBVHBuildNode *children[4]{NULL};
     int axis[3]{};
     switch (collapseVariant) {
-    //Just widen node with empty children
     case 1:
+        // Just widen node with empty children
         children[2] = children[3] = NULL;
         axis[0] = binRoot->splitAxis;
         children[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
         children[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
         break;
-    //Taking grandchildren as children
+    case 2:
+        // Bottom up collapsing
+        FourWideBVHBuildNode *collapsed[2];
+        collapsed[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        collapsed[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        if (collapsed[0]->IsLeaf() && collapsed[1]->IsLeaf()) {
+            children[0] = collapsed[0];
+            children[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+            break;
+        }
+        // fill this node with all grandchildren if possible
+        if (collapsed[0]->numChildren() + collapsed[1]->numChildren() <= TreeWidth) {
+            int idx = 0;
+            if (collapsed[0]->IsLeaf()) {
+                children[idx++] = collapsed[0];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[0]->children[i];
+                    if (child) {
+                        children[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[0]->splitAxis[i - 1];
+                    }
+                }
+            }
+            int parIdx = idx;
+            if (collapsed[1]->IsLeaf()) {
+                children[idx++] = collapsed[1];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[1]->children[i];
+                    if (child) {
+                        children[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[1]->splitAxis[i - 1];
+                    }
+                }
+            }
+            axis[parIdx - 1] = binRoot->splitAxis;
+            
+        } else {
+            children[0] = collapsed[0];
+            children[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+        }
+        break;
     default:
+        // Taking grandchildren as children
         axis[0] = binRoot->children[0]->splitAxis;
         axis[1] = binRoot->splitAxis;
         axis[2] = binRoot->children[1]->splitAxis;
@@ -2523,31 +2578,25 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         }
                     }
                     CHECK_GE(dim1ProposedSplit, 0);
-                    centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
-                    centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
-                    // Approximate best sunbsequent split axis by using the max dimension
-                    // for most probable split on main dimension
-                    axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
-                    axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
                 }
                 Float minCost = Infinity;
                 int minCostRow = -1;
                 int minCostColAbove = -1;
                 int minCostColBelow = -1;
                 do {
-                    // Update bounds and split row if this is not the first iteration
+                    // Update split row if this is not the first iteration
                     if (minCostRow != -1) {
                         dim1ProposedSplit = minCostRow;
-                        centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
-                        centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
-                        // Approximate best sunbsequent split axis by using the max
-                        // dimension for most probable split on main dimension
-                        axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
-                        axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
                     }
+                    // Approximate best sunbsequent split axis by using the max
+                    // cntreoid bound dimension for most probable split on main dimension
+                    centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
+                    centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
+                    axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
+                    axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
                     BVHSplitBucket buckets0[nBuckets][nBuckets];
                     BVHSplitBucket buckets2[nBuckets][nBuckets];
-                    // Initialize _BVHSplitBucket_ for SAH partition buckets
+                    // Initialize _BVHSplitBucket_ arrays for partition buckets
                     for (const auto &prim : bvhPrimitives) {
                         int b1 =
                             nBuckets * centroidBounds.Offset(prim.Centroid())[axis[1]];
@@ -3154,6 +3203,55 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
         newChildren[1] =
             collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
         break;
+    case 2:
+        // Bottom up collapsing
+        EightWideBVHBuildNode *collapsed[2];
+        collapsed[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        collapsed[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        if (collapsed[0]->IsLeaf() && collapsed[1]->IsLeaf()) {
+            newChildren[0] = collapsed[0];
+            newChildren[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+            break;
+        }
+        // fill this node with all grandchildren if possible
+        if (collapsed[0]->numChildren() + collapsed[1]->numChildren() <= TreeWidth) {
+            int idx = 0;
+            if (collapsed[0]->IsLeaf()) {
+                newChildren[idx++] = collapsed[0];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[0]->children[i];
+                    if (child) {
+                        newChildren[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[0]->splitAxis[i - 1];
+                    }
+                }
+            }
+            int parIdx = idx;
+            if (collapsed[1]->IsLeaf()) {
+                newChildren[idx++] = collapsed[1];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[1]->children[i];
+                    if (child) {
+                        newChildren[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[1]->splitAxis[i - 1];
+                    }
+                }
+            }
+            axis[parIdx - 1] = binRoot->splitAxis;
+
+        } else {
+            newChildren[0] = collapsed[0];
+            newChildren[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+        }
+        break;
     default:
         axis[3] = binRoot->splitAxis;
         BVHBuildNode *intermediateChildren[4]{};
@@ -3673,7 +3771,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 proposedBuckets[bestSplit]->count = bucketsAbove[minCostBucket].count;
                 proposedBuckets[bestSplit]->bounds = bucketsAbove[minCostBucket].bounds;
             }
-            // Consider leaf if
+            // Consider leaf
             if (bvhPrimitives.size() <= maxPrimsInNode) {
                 // Compute leaf cost and SAH split cost for chosen
                 if (leafCost(bvhPrimitives.size()) <= RelativeInnerCost +
@@ -3973,6 +4071,55 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
             collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
         newChildren[1] =
             collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        break;
+    case 2:
+        // Bottom up collapsing
+        SixteenWideBVHBuildNode *collapsed[2];
+        collapsed[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
+        collapsed[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        if (collapsed[0]->IsLeaf() && collapsed[1]->IsLeaf()) {
+            newChildren[0] = collapsed[0];
+            newChildren[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+            break;
+        }
+        // fill this node with all grandchildren if possible
+        if (collapsed[0]->numChildren() + collapsed[1]->numChildren() <= TreeWidth) {
+            int idx = 0;
+            if (collapsed[0]->IsLeaf()) {
+                newChildren[idx++] = collapsed[0];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[0]->children[i];
+                    if (child) {
+                        newChildren[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[0]->splitAxis[i - 1];
+                    }
+                }
+            }
+            int parIdx = idx;
+            if (collapsed[1]->IsLeaf()) {
+                newChildren[idx++] = collapsed[1];
+            } else {
+                --*totalNodes;
+                for (int i = 0; i < TreeWidth; ++i) {
+                    auto child = collapsed[1]->children[i];
+                    if (child) {
+                        newChildren[idx++] = child;
+                        if (idx > 1)
+                            axis[idx - 2] = collapsed[1]->splitAxis[i - 1];
+                    }
+                }
+            }
+            axis[parIdx - 1] = binRoot->splitAxis;
+
+        } else {
+            newChildren[0] = collapsed[0];
+            newChildren[1] = collapsed[1];
+            axis[0] = binRoot->splitAxis;
+        }
         break;
     default:
         axis[7] = binRoot->splitAxis;
