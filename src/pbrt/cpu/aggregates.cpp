@@ -1230,20 +1230,20 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     --*totalNodes;
                     opmiziationDone = true;
                     parent->setChild(mergedChildIdx, NULL);
-                for (int i = 0; i < TreeWidth; ++i) {
-                    parent->setChild(i, newChildren[i]);
-                }
-                for (int i = 0; i < TreeWidth - 1; ++i) {
-                    parent->setAxis(i, newAxis[i]);
-                }
+                    for (int i = 0; i < TreeWidth; ++i) {
+                        parent->setChild(i, newChildren[i]);
+                    }
+                    for (int i = 0; i < TreeWidth - 1; ++i) {
+                        parent->setAxis(i, newAxis[i]);
+                    }
                     //Look at all children again
                     if (parent->numChildren() < TreeWidth) {
-                mergedChildIdx = -1;
+                        mergedChildIdx = -1;
                     } else {
                         break;
                     }
+                }
             }
-        }
         }
         return opmiziationDone;
     };
@@ -2160,6 +2160,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds, metricsEnabled);
         return leaf;
     }
+    bool isRoot = (*totalNodes) == 0;
     FourWideBVHBuildNode *children[4]{NULL};
     int axis[3]{};
     switch (collapseVariant) {
@@ -2241,6 +2242,8 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
     ++*totalNodes;
     FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
     node->InitInterior(axis, children, metricsEnabled);
+    if (isRoot && collapseVariant == 1)
+        optimizeTree(node, totalNodes, MergeIntoParent);
     return node;
 };
 FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
