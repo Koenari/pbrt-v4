@@ -171,6 +171,7 @@ struct WideBVHBuildNode : ICostCalcable {
     bool IsLeaf() const {
         return nPrimitives > 0;
     }
+    virtual WideBVHBuildNode **getChildren() const = 0;
     virtual WideBVHBuildNode *getChild(int idx) const = 0;
     virtual int getAxis(int idx) const = 0;
     virtual void setChild(int idx, WideBVHBuildNode *child) = 0;
@@ -222,6 +223,9 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
         return count;
     };
     int splitAxis[3];
+    WideBVHBuildNode **getChildren() const override {
+        return (WideBVHBuildNode **)&children[0];
+    }
     WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
     int getAxis(int idx) const override { return splitAxis[idx]; }
     void setAxis(int idx, int axis) override { splitAxis[idx] = axis; }
@@ -284,7 +288,9 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
         }
         return count;
     };
-
+    WideBVHBuildNode **getChildren() const override {
+        return (WideBVHBuildNode **)&children[0];
+    }
     WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
     void setChild(int idx, WideBVHBuildNode *child) override {
         children[idx] = (EightWideBVHBuildNode *)child;
@@ -348,7 +354,9 @@ struct SixteenWideBVHBuildNode : WideBVHBuildNode {
         }
         return count;
     };
-
+    WideBVHBuildNode **getChildren() const override {
+        return (WideBVHBuildNode **)&children[0];
+    }
     WideBVHBuildNode *getChild(int idx) const override { return children[idx]; }
     void setChild(int idx, WideBVHBuildNode *child) override {
         children[idx] = (SixteenWideBVHBuildNode *)child;
@@ -1153,12 +1161,6 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             if (child == NULL || child->IsLeaf())
                 continue;
             if ((parent->numChildren() + child->numChildren() - 1) <= TreeWidth) {
-                bvhOptiIntoParent++;
-                emptyNodes -= (TreeWidth - 1);
-                --interiorNodes;
-                --*totalNodes;
-                opmiziationDone = true;
-                parent->setChild(mergedChildIdx, NULL);
                 WideBVHBuildNode *newChildren[MaxTreeWidth]{NULL};
                 int newAxis[MaxTreeWidth-1]{0};
                 int lastParIdx = -1;
@@ -1210,14 +1212,38 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 DCHECK_LE(curIdx, TreeWidth);
                 DCHECK_LT(lastParIdx, TreeWidth);
                 DCHECK_LT(lastChildIdx, TreeWidth);
+                //Calculate cost of parent and child to merge
+                Float oldCost = splitCost(TreeWidth, (ICostCalcable**)parent->getChildren(), parent->bounds);
+                oldCost += penalizedHitProbability(
+                               mergedChildIdx, TreeWidth,
+                               (ICostCalcable **)parent->getChildren(), parent->bounds) *
+                           (RelativeInnerCost +
+                           splitCost(TreeWidth, (ICostCalcable **)child->getChildren(),
+                                     child->bounds));
+                Float newCost =
+                    splitCost(TreeWidth, (ICostCalcable **)newChildren, parent->bounds);
+                if (newCost < oldCost) {
+                    // Fill paretn with new children
+                    bvhOptiIntoParent++;
+                    emptyNodes -= (TreeWidth - 1);
+                    --interiorNodes;
+                    --*totalNodes;
+                    opmiziationDone = true;
+                    parent->setChild(mergedChildIdx, NULL);
                 for (int i = 0; i < TreeWidth; ++i) {
                     parent->setChild(i, newChildren[i]);
                 }
                 for (int i = 0; i < TreeWidth - 1; ++i) {
                     parent->setAxis(i, newAxis[i]);
                 }
+                    //Look at all children again
+                    if (parent->numChildren() < TreeWidth) {
                 mergedChildIdx = -1;
+                    } else {
+                        break;
+                    }
             }
+        }
         }
         return opmiziationDone;
     };
