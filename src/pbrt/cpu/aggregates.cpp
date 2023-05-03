@@ -1385,7 +1385,7 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 lastIdx = i;
                 curIdx++;
             }
-            CHECK_EQ(curIdx, child1->numChildren() + child2->numChildren());
+            DCHECK_EQ(curIdx, child1->numChildren() + child2->numChildren());
             for (int i = 0; i < TreeWidth; ++i) {
                 parent->getChild(bestI)->setChild(i, newChildren[i]);
             }
@@ -2606,7 +2606,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                             dim1ProposedSplit = i;
                         }
                     }
-                    CHECK_GE(dim1ProposedSplit, 0);
+                    DCHECK_GE(dim1ProposedSplit, 0);
                 }
                 Float minCost = Infinity;
                 int minCostRow = -1;
@@ -2885,8 +2885,8 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                                 nBuckets * curCentroidBounds.Offset(prim.Centroid())[dim];
                             if (b == nBuckets)
                                 b = nBuckets - 1;
-                            CHECK_GE(b, 0);
-                            CHECK_LT(b, nBuckets);
+                            DCHECK_GE(b, 0);
+                            DCHECK_LT(b, nBuckets);
                             buckets[b].count++;
                             buckets[b].bounds = Union(buckets[b].bounds, prim.bounds);
                         }
@@ -2997,8 +2997,9 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
         splitPoints[3] = splits[2];
         splitPoints[4] = bvhPrimitives.size();
         FourWideBVHBuildNode *children[MaxTreeWidth];
+        int paralellMin = splitVariant >= 2 ? 8 * 1024 : 128 * 1024;
         // Recursively build BVHs for _children_
-        if (bvhPrimitives.size() > 128 * 1024) {
+        if (bvhPrimitives.size() > paralellMin) {
             // Recursively build oldChild BVHs in parallel
             ParallelFor(0, TreeWidth, [&](int i) {
                 DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
