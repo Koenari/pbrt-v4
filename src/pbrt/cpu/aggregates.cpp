@@ -24,7 +24,7 @@ STAT_MEMORY_COUNTER("Memory/BVH Memory", treeBytes);
 //Tree Creation
 STAT_RATIO("BVH Creation/Count Primitives per leaf", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH Creation/Count Interior Nodes", interiorNodes);
-STAT_PERCENT("BVH Creation/Count Empty Nodes", emptyNodes, totalNodes);
+STAT_PERCENT("BVH Creation/Count Empty Nodes", emptyNodes, bvhTotalNodes);
 STAT_PERCENT("BVH Creation/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Leaves", bvhLeafDepth);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Interior", bvhIntNodeDepth);
@@ -207,7 +207,7 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
         splitAxis[2] = a[2];
         nPrimitives = 0;
         if (enableMetrics) {
-            totalNodes += 4;
+            bvhTotalNodes += 4;
             ++interiorNodes;
         }
     }
@@ -274,7 +274,7 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
         }
         nPrimitives = 0;
         if (enableMetrics) {
-            totalNodes += 8;
+            bvhTotalNodes += 8;
             ++interiorNodes;
         }
     }
@@ -340,7 +340,7 @@ struct SixteenWideBVHBuildNode : WideBVHBuildNode {
         }
         nPrimitives = 0;
         if (enableMetrics) {
-            totalNodes += 16;
+            bvhTotalNodes += 16;
             ++interiorNodes;
         }
     }
@@ -2153,14 +2153,14 @@ int8_t FourWideBVHAggregate::relevantAxisIdx(int axis1, int axis2) const {
 }
 //Private functions
 FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot,
-                                                         std::atomic<int> *totalNodes,
+                                                         std::atomic<int> *totalNodesLocal,
                                                          int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         FourWideBVHBuildNode *leaf = new FourWideBVHBuildNode();
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds, metricsEnabled);
         return leaf;
     }
-    bool isRoot = (*totalNodes) == 0;
+    bool isRoot = (*totalNodesLocal) == 0;
     FourWideBVHBuildNode *children[4]{NULL};
     int axis[3]{};
     switch (collapseVariant) {
@@ -2168,14 +2168,14 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
         // Just widen node with empty children
         children[2] = children[3] = NULL;
         axis[0] = binRoot->splitAxis;
-        children[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
-        children[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        children[0] = collapseBinBVH(binRoot->children[0], totalNodesLocal, collapseVariant);
+        children[1] = collapseBinBVH(binRoot->children[1], totalNodesLocal, collapseVariant);
         break;
     case 2:
         // Bottom up collapsing
         FourWideBVHBuildNode *collapsed[2];
-        collapsed[0] = collapseBinBVH(binRoot->children[0], totalNodes, collapseVariant);
-        collapsed[1] = collapseBinBVH(binRoot->children[1], totalNodes, collapseVariant);
+        collapsed[0] = collapseBinBVH(binRoot->children[0], totalNodesLocal, collapseVariant);
+        collapsed[1] = collapseBinBVH(binRoot->children[1], totalNodesLocal, collapseVariant);
         if (collapsed[0]->IsLeaf() && collapsed[1]->IsLeaf()) {
             children[0] = collapsed[0];
             children[1] = collapsed[1];
@@ -2188,7 +2188,10 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
             if (collapsed[0]->IsLeaf()) {
                 children[idx++] = collapsed[0];
             } else {
-                --*totalNodes;
+                interiorNodes--;
+                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
+                bvhTotalNodes -= TreeWidth;
+                --*totalNodesLocal;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
                     if (child) {
@@ -2202,7 +2205,10 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
             if (collapsed[1]->IsLeaf()) {
                 children[idx++] = collapsed[1];
             } else {
-                --*totalNodes;
+                interiorNodes--;
+                emptyNodes -= (TreeWidth-collapsed[1]->numChildren());
+                bvhTotalNodes -= TreeWidth;
+                --*totalNodesLocal;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
                     if (child) {
@@ -2228,22 +2234,22 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
         for (int i = 0; i < 2; ++i) {
             auto child = binRoot->children[i];
             if (child->nPrimitives > 0) {
-                children[i * 2] = collapseBinBVH(child, totalNodes, collapseVariant);
+                children[i * 2] = collapseBinBVH(child, totalNodesLocal, collapseVariant);
                 children[i * 2 + 1] = NULL;
             } else {
                 children[i * 2] =
-                    collapseBinBVH(child->children[0], totalNodes, collapseVariant);
+                    collapseBinBVH(child->children[0], totalNodesLocal, collapseVariant);
                 children[i * 2 + 1] =
-                    collapseBinBVH(child->children[1], totalNodes, collapseVariant);
+                    collapseBinBVH(child->children[1], totalNodesLocal, collapseVariant);
             }
         }
         break;
     }
-    ++*totalNodes;
+    ++*totalNodesLocal;
     FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
     node->InitInterior(axis, children, metricsEnabled);
     if (isRoot && collapseVariant == 1)
-        optimizeTree(node, totalNodes, MergeIntoParent);
+        optimizeTree(node, totalNodesLocal, MergeIntoParent);
     return node;
 };
 FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
@@ -3250,6 +3256,9 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
             if (collapsed[0]->IsLeaf()) {
                 newChildren[idx++] = collapsed[0];
             } else {
+                interiorNodes--;
+                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
+                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
@@ -3264,6 +3273,9 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
             if (collapsed[1]->IsLeaf()) {
                 newChildren[idx++] = collapsed[1];
             } else {
+                interiorNodes--;
+                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
+                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
@@ -3820,7 +3832,8 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             break;
         }
         EightWideBVHBuildNode *children[MaxTreeWidth];
-        if (bvhPrimitives.size() > 128 * 1024) {
+        int paralellMin = splitVariant >= 2 ? 8 * 1024 : 128 * 1024;
+        if (bvhPrimitives.size() > paralellMin) {
             // Recursively build oldChild BVHs in parallel
             ParallelFor(0, TreeWidth, [&](int i) {
                 DCHECK_LE(splitPoints[i], splitPoints[i + 1]);
@@ -4119,6 +4132,9 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
             if (collapsed[0]->IsLeaf()) {
                 newChildren[idx++] = collapsed[0];
             } else {
+                interiorNodes--;
+                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
+                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
@@ -4133,6 +4149,9 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
             if (collapsed[1]->IsLeaf()) {
                 newChildren[idx++] = collapsed[1];
             } else {
+                interiorNodes--;
+                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
+                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
