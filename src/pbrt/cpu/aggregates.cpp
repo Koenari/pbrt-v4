@@ -1096,8 +1096,8 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
             Float unionedExtraVol = overlap.Volume();
             Float extraVol =
                 unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
-            prob *= (1 + epoRatio * extraVol / combinedBounds.Volume());
-            //prob *= ((1-epoRatio) + epoRatio * extraVol / combinedBounds.Volume());
+            prob *= (1 - epoRatio);
+            prob += epoRatio * extraVol / combinedBounds.Volume();
         }
     }
     return prob;
