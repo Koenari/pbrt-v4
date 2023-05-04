@@ -22,9 +22,9 @@
 namespace pbrt {
 STAT_MEMORY_COUNTER("Memory/BVH Memory", treeBytes);
 //Tree Creation
-STAT_RATIO("BVH Creation/Count Primitives per leaf", totalPrimitives, totalLeafNodes);
-STAT_COUNTER("BVH Creation/Count Interior Nodes", interiorNodes);
-STAT_PERCENT("BVH Creation/Count Empty Nodes", emptyNodes, bvhTotalNodes);
+STAT_RATIO("BVH Creation/Count Primitives per leaf", bvhTotalPrimitives, bvhTotalLeafNodes);
+STAT_COUNTER("BVH Creation/Count Interior Nodes", bvhInteriorNodes);
+STAT_PERCENT("BVH Creation/Count Empty Nodes", bvhEmptyNodes, bvhTotalNodes);
 STAT_PERCENT("BVH Creation/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Leaves", bvhLeafDepth);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Interior", bvhIntNodeDepth);
@@ -139,8 +139,9 @@ struct BVHBuildNode : ICostCalcable {
         bounds = b;
         children[0] = children[1] = nullptr;
         if (enableMetrics) {
-            ++totalLeafNodes;
-            totalPrimitives += n;
+            ++bvhTotalLeafNodes;
+            ++bvhTotalNodes;
+            bvhTotalPrimitives += n;
         }
     }
 
@@ -150,10 +151,11 @@ struct BVHBuildNode : ICostCalcable {
         bounds = Union(c0->bounds, c1->bounds);
         splitAxis = axis;
         nPrimitives = 0;
-        if (enableMetrics)
-            ++interiorNodes;
+        if (enableMetrics) {
+            ++bvhInteriorNodes;
+            ++bvhTotalNodes;
+        }
     }
-
     Bounds3f bounds;
     BVHBuildNode *children[2];
     int splitAxis, firstPrimOffset, nPrimitives;
@@ -177,41 +179,39 @@ struct WideBVHBuildNode : ICostCalcable {
     virtual void setChild(int idx, WideBVHBuildNode *child) = 0;
     virtual void setAxis(int idx, int axis) = 0;
     virtual int numChildren() const = 0;
+    virtual void calcMetrics() const = 0;
 };
 // Wide BVHBuildNote defintion with 4 children
 struct FourWideBVHBuildNode : WideBVHBuildNode {
-    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
+    static constexpr size_t Width = 4;
+    FourWideBVHBuildNode *children[Width];
+    int splitAxis[Width-1];
+    void InitLeaf(int first, int n, const Bounds3f &b) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = nullptr;
-        if (enableMetrics) {
-            ++totalLeafNodes;
-            totalPrimitives += n;
-        }
     }
-
-    void InitInterior(int a[3], FourWideBVHBuildNode *c[4], bool enableMetrics) {
-        children[0] = c[0];
-        children[1] = c[1];
-        children[2] = c[2];
-        children[3] = c[3];
-        for (int i = 0; i < 4; ++i) {
+    void InitInterior(int a[Width-1], FourWideBVHBuildNode *c[Width]) {
+        for (int i = 0; i < Width; ++i) {
+            children[i] = c[i];
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else if (enableMetrics)
-                emptyNodes++;
+            if (i < Width-1)
+                splitAxis[i] = a[i];
         }
-        splitAxis[0] = a[0];
-        splitAxis[1] = a[1];
-        splitAxis[2] = a[2];
         nPrimitives = 0;
-        if (enableMetrics) {
-            bvhTotalNodes += 4;
-            ++interiorNodes;
+    }
+    void calcMetrics() const override {
+        if (IsLeaf()) {
+            ++bvhTotalLeafNodes;
+            bvhTotalPrimitives += nPrimitives;
+        } else {
+            bvhTotalNodes += Width;
+            bvhEmptyNodes += (Width - numChildren());
+            ++bvhInteriorNodes;
         }
     }
-    FourWideBVHBuildNode *children[4];
     int numChildren() const override {
         if (IsLeaf())
             return 1;
@@ -222,7 +222,6 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
         }
         return count;
     };
-    int splitAxis[3];
     WideBVHBuildNode **getChildren() const override {
         return (WideBVHBuildNode **)&children[0];
     }
@@ -248,41 +247,44 @@ struct FourWideBVHBuildNode : WideBVHBuildNode {
 };
 // Wide BVHBuildNote defintion with 8 newChildren
 struct EightWideBVHBuildNode : WideBVHBuildNode {
-    EightWideBVHBuildNode *children[8];
-    int splitAxis[7];
-    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
+    static constexpr size_t Width = 8;
+    EightWideBVHBuildNode *children[Width];
+    int splitAxis[Width-1];
+    void InitLeaf(int first, int n, const Bounds3f &b) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         children[0] = children[1] = children[2] = children[3] = children[4] =
             children[5] = children[6] = children[7] = nullptr;
-        if (enableMetrics) {
-            ++totalLeafNodes;
-            totalPrimitives += n;
-        }
     }
 
-    void InitInterior(int a[7], EightWideBVHBuildNode *c[8], bool enableMetrics) {
-        for (int i = 0; i < 8; ++i) {
+    void InitInterior(int a[Width-1], EightWideBVHBuildNode *c[Width]) {
+        for (int i = 0; i < Width; ++i) {
             children[i] = c[i];
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else if (enableMetrics)
-                emptyNodes++;
-            if (i < 7)
-                splitAxis[0] = a[0];
+            if (i < Width-1)
+                splitAxis[i] = a[i];
         }
         nPrimitives = 0;
-        if (enableMetrics) {
-            bvhTotalNodes += 8;
-            ++interiorNodes;
+    }
+
+    void calcMetrics() const override {
+        if (IsLeaf()) {
+            ++bvhTotalLeafNodes;
+            bvhTotalPrimitives += nPrimitives;
+        } else {
+            bvhTotalNodes += Width;
+            bvhEmptyNodes += (Width - numChildren());
+            ++bvhInteriorNodes;
         }
     }
+
     int numChildren() const override {
         if (IsLeaf())
             return 1;
         int count = 0;
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < Width; ++i) {
             if (children[i])
                 count++;
         }
@@ -303,7 +305,7 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
             return nPrimitives;
         } else {
             int count = 0;
-            for (int i = 0; i < 8; ++i) {
+            for (int i = 0; i < Width; ++i) {
                 if (children[i]) {
                     count += children[i]->PrimCount();
                 }
@@ -314,36 +316,39 @@ struct EightWideBVHBuildNode : WideBVHBuildNode {
 };
 // Wide BVHBuildNote defintion with 8 newChildren
 struct SixteenWideBVHBuildNode : WideBVHBuildNode {
-    SixteenWideBVHBuildNode *children[16];
-    int splitAxis[15];
-    void InitLeaf(int first, int n, const Bounds3f &b, bool enableMetrics) {
+    static constexpr size_t Width = 16;
+    SixteenWideBVHBuildNode *children[Width];
+    int splitAxis[Width-1];
+    void InitLeaf(int first, int n, const Bounds3f &b) {
         firstPrimOffset = first;
         nPrimitives = n;
         bounds = b;
         for (int i = 0; i < 16; ++i)
             children[i] = NULL;
-        if (enableMetrics) {
-            ++totalLeafNodes;
-            totalPrimitives += n;
-        }
     }
 
-    void InitInterior(int a[15], SixteenWideBVHBuildNode *c[16], bool enableMetrics) {
-        for (int i = 0; i < 16; ++i) {
+    void InitInterior(int a[Width-1], SixteenWideBVHBuildNode *c[Width]) {
+        for (int i = 0; i < Width; ++i) {
             children[i] = c[i];
             if (children[i])
                 bounds = Union(bounds, children[i]->bounds);
-            else if (enableMetrics)
-                emptyNodes++;
-            if (i < 15)
+            if (i < Width-1)
                 splitAxis[0] = a[0];
         }
         nPrimitives = 0;
-        if (enableMetrics) {
-            bvhTotalNodes += 16;
-            ++interiorNodes;
+    }
+
+    void calcMetrics() const override {
+        if (IsLeaf()) {
+            ++bvhTotalLeafNodes;
+            bvhTotalPrimitives += nPrimitives;
+        } else {
+            bvhTotalNodes += Width;
+            bvhEmptyNodes += (Width - numChildren());
+            ++bvhInteriorNodes;
         }
     }
+
     int numChildren() const override {
         if (IsLeaf())
             return 1;
@@ -1092,6 +1097,7 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
             Float extraVol =
                 unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
             prob *= (1 + epoRatio * extraVol / combinedBounds.Volume());
+            //prob *= ((1-epoRatio) + epoRatio * extraVol / combinedBounds.Volume());
         }
     }
     return prob;
@@ -1121,6 +1127,7 @@ Bounds3f WideBVHAggregate::Bounds() const {
     return bounds;
 }
 Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
+    root->calcMetrics();
     if (root->IsLeaf()) {
         bvhLeafDepth << depth;
         return leafCost(root->PrimCount());
@@ -1225,8 +1232,6 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                 if (newCost < oldCost) {
                     // Fill paretn with new children
                     bvhOptiIntoParent++;
-                    emptyNodes -= (TreeWidth - 1);
-                    --interiorNodes;
                     --*totalNodes;
                     opmiziationDone = true;
                     parent->setChild(mergedChildIdx, NULL);
@@ -1293,8 +1298,6 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
                     child1->bounds = newLeaf.bounds;
                     parent->setChild(i,child1);
                     parent->setChild(j, NULL);
-                    emptyNodes++;
-                    totalLeafNodes--;
                     i = -1;
                     break;
                 }
@@ -1349,11 +1352,9 @@ bool WideBVHAggregate::optimizeTree(WideBVHBuildNode *root, std::atomic<int> *to
             }
             if (maxReduction <= 0)
                 return opmtimizationDone;
-            bvhOptiInner++;
             opmtimizationDone = true;
+            bvhOptiInner++;
             --*totalNodes;
-            --interiorNodes;
-            emptyNodes -= (TreeWidth - 1);
             int planeBetweenChildren = parent->getAxis(relevantAxisIdx(bestI, bestJ));
             auto child1 = parent->getChild(bestI);
             auto child2 = parent->getChild(bestJ);
@@ -2157,7 +2158,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
                                                          int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         FourWideBVHBuildNode *leaf = new FourWideBVHBuildNode();
-        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds, metricsEnabled);
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
     bool isRoot = (*totalNodesLocal) == 0;
@@ -2188,9 +2189,6 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
             if (collapsed[0]->IsLeaf()) {
                 children[idx++] = collapsed[0];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
-                bvhTotalNodes -= TreeWidth;
                 --*totalNodesLocal;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
@@ -2205,9 +2203,6 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
             if (collapsed[1]->IsLeaf()) {
                 children[idx++] = collapsed[1];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth-collapsed[1]->numChildren());
-                bvhTotalNodes -= TreeWidth;
                 --*totalNodesLocal;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
@@ -2247,7 +2242,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRoot
     }
     ++*totalNodesLocal;
     FourWideBVHBuildNode *node = new FourWideBVHBuildNode();
-    node->InitInterior(axis, children, metricsEnabled);
+    node->InitInterior(axis, children);
     if (isRoot && collapseVariant == 1)
         optimizeTree(node, totalNodesLocal, MergeIntoParent);
     return node;
@@ -2273,7 +2268,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
         return node;
 
     } else {
@@ -2291,7 +2286,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
             return node;
         }
         // Cut in 4
@@ -2531,8 +2526,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         int index = bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
                     }
-                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                                   metricsEnabled);
+                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                     return node;
                 }
             } break;
@@ -2798,8 +2792,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                         int index = bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
                     }
-                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                                   metricsEnabled);
+                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                     return node;
                 }
                 auto midIter = std::partition(
@@ -2984,8 +2977,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                             int index = bvhPrimitives[i].primitiveIndex;
                             orderedPrims[firstPrimOffset + i] = primitives[index];
                         }
-                        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                                       metricsEnabled);
+                        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                         return node;
                     }
                 }
@@ -3028,7 +3020,7 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
             }
         }
         ++*totalNodes;
-        node->InitInterior(axis, children, metricsEnabled);
+        node->InitInterior(axis, children);
         return node;
     }
 }
@@ -3225,8 +3217,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
                                                            std::atomic<int> *totalNodes, int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         EightWideBVHBuildNode *leaf = new EightWideBVHBuildNode();
-        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds,
-                       metricsEnabled);
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
     EightWideBVHBuildNode *newChildren[8]{NULL};
@@ -3256,9 +3247,6 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
             if (collapsed[0]->IsLeaf()) {
                 newChildren[idx++] = collapsed[0];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
-                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
@@ -3273,9 +3261,6 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
             if (collapsed[1]->IsLeaf()) {
                 newChildren[idx++] = collapsed[1];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
-                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
@@ -3333,7 +3318,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
     }
     EightWideBVHBuildNode *newNode = new EightWideBVHBuildNode();
     ++*totalNodes;
-    newNode->InitInterior(axis, newChildren, metricsEnabled);
+    newNode->InitInterior(axis, newChildren);
     return newNode;
 };
 //ToDo: Finish
@@ -3358,7 +3343,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
         return node;
 
     } else {
@@ -3376,7 +3361,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
             return node;
         }
         // For simplicity only metrics with a splitCost() are allowed
@@ -3670,8 +3655,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                     int index = bvhPrimitives[i].primitiveIndex;
                     orderedPrims[firstPrimOffset + i] = primitives[index];
                 }
-                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                               metricsEnabled);
+                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                 return node;
             }
             BVHPrimitive *iters[7];
@@ -3824,8 +3808,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
                         int index = bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
                     }
-                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                                   metricsEnabled);
+                    node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                     return node;
                 }
             }
@@ -3856,7 +3839,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::buildRecursive(
             }
         }
         ++*totalNodes;
-        node->InitInterior(axis, children, metricsEnabled);
+        node->InitInterior(axis, children);
         return node;
     }
 }
@@ -4101,8 +4084,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
     int collapseVariant) {
     if (binRoot->nPrimitives > 0) {
         SixteenWideBVHBuildNode *leaf = new SixteenWideBVHBuildNode();
-        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds,
-                       metricsEnabled);
+        leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
     SixteenWideBVHBuildNode *newChildren[16]{NULL};
@@ -4132,9 +4114,6 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
             if (collapsed[0]->IsLeaf()) {
                 newChildren[idx++] = collapsed[0];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
-                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[0]->children[i];
@@ -4149,9 +4128,6 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
             if (collapsed[1]->IsLeaf()) {
                 newChildren[idx++] = collapsed[1];
             } else {
-                interiorNodes--;
-                emptyNodes -= (TreeWidth - collapsed[1]->numChildren());
-                totalNodes -= TreeWidth;
                 --*totalNodes;
                 for (int i = 0; i < TreeWidth; ++i) {
                     auto child = collapsed[1]->children[i];
@@ -4227,7 +4203,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
     }
     SixteenWideBVHBuildNode *newNode = new SixteenWideBVHBuildNode();
     ++*totalNodes;
-    newNode->InitInterior(axis, newChildren, metricsEnabled);
+    newNode->InitInterior(axis, newChildren);
     return newNode;
 }
 SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
@@ -4251,7 +4227,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
             int index = bvhPrimitives[i].primitiveIndex;
             orderedPrims[firstPrimOffset + i] = primitives[index];
         }
-        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+        node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
         return node;
 
     } else {
@@ -4269,7 +4245,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
                 int index = bvhPrimitives[i].primitiveIndex;
                 orderedPrims[firstPrimOffset + i] = primitives[index];
             }
-            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds, metricsEnabled);
+            node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
             return node;
         }
         // For simplicity only metrics with a splitCost() are allowed
@@ -4421,8 +4397,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
                     int index = bvhPrimitives[i].primitiveIndex;
                     orderedPrims[firstPrimOffset + i] = primitives[index];
                 }
-                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds,
-                               metricsEnabled);
+                node->InitLeaf(firstPrimOffset, bvhPrimitives.size(), bounds);
                 return node;
             }
         }
@@ -4450,7 +4425,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
             }
         }
         ++*totalNodes;
-        node->InitInterior(axis, children, metricsEnabled);
+        node->InitInterior(axis, children);
         return node;
     }
 }
