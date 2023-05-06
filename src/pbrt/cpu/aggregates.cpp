@@ -1079,31 +1079,52 @@ Float BVHAggregate::leafCost(int primCount) const {
 Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **buckets,
                                             Bounds3f combinedBounds) const {
     const ICostCalcable *bucket = buckets[idx];
+    //Switch between different approaches to approximate overlapping prims
+    bool constexpr useVolApprox = true;
     if (idx >= count || bucket == NULL)
         return 0.f;
-    Float prob = bucket->Bounds().SurfaceArea() / combinedBounds.SurfaceArea();
+    Float prob = bucket->Bounds().SurfaceArea();
     if (splitMethod == SplitMethod::EPO && epoRatio > 0) {
+        prob *= (1 - epoRatio);
         Float addedExtraVol = 0;
-        Bounds3f overlap;
+        Float addedExtraSA = 0;
+        Bounds3f unionedOverlap;
         for (int j = 0; j < count; ++j) {
             if (j == idx || !(buckets[j]))
                 continue;
-            if (Overlaps(bucket->Bounds(), buckets[j]->Bounds())) {
-                Bounds3f curOverlap =
-                    pbrt::Intersect(bucket->Bounds(), buckets[j]->Bounds());
-                overlap = Union(overlap, curOverlap);
-                addedExtraVol += curOverlap.Volume();
+            Bounds3f otherBound = buckets[j]->Bounds();
+            Bounds3f curOverlap = pbrt::Intersect(bucket->Bounds(), otherBound);
+            if (!curOverlap.IsEmpty()) {
+                if constexpr (useVolApprox) {
+                    //Create a AABB araound all overlaps
+                    unionedOverlap = Union(unionedOverlap, curOverlap);
+                    //Keep track of the volume of each overlap AABB individually
+                    addedExtraVol += curOverlap.Volume();
+                } else {
+                    // Add the surface area of overlapped node proportainal to percentage
+                    // overlap in volume
+                    addedExtraSA += (curOverlap.Volume() / otherBound.Volume()) *
+                                    otherBound.SurfaceArea();
+                }
             }
         }
-        if (!overlap.IsEmpty()) {
-            Float unionedExtraVol = overlap.Volume();
-            Float extraVol =
-                unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
-            prob *= (1 - epoRatio);
-            prob += epoRatio * extraVol / combinedBounds.Volume();
+        if constexpr (useVolApprox) {
+            if (!unionedOverlap.IsEmpty()) {
+                Float unionedExtraVol = unionedOverlap.Volume();
+                Float extraVol =
+                    unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
+
+                // Approximate by percentag of root node taken up by overlaps
+                prob += epoRatio * (extraVol / combinedBounds.Volume()) *
+                        combinedBounds.SurfaceArea();
+            }
+        } else {
+            // Aproximate by adding Surface Areas approximations calculated per overlap
+            prob += epoRatio * addedExtraSA;
         }
+        
     }
-    return prob;
+    return prob / combinedBounds.SurfaceArea();
 }
 Float BVHAggregate::childCost(int idx, int count, ICostCalcable **buckets,
                               Bounds3f combinedBounds) const {
