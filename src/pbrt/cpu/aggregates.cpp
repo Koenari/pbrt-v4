@@ -25,10 +25,13 @@ STAT_MEMORY_COUNTER("Memory/BVH Memory", treeBytes);
 STAT_RATIO("BVH Creation/Count Primitives per leaf", bvhTotalPrimitives, bvhTotalLeafNodes);
 STAT_COUNTER("BVH Creation/Count Interior Nodes", bvhInteriorNodes);
 STAT_PERCENT("BVH Creation/Count Empty Nodes", bvhEmptyNodes, bvhTotalNodes);
+STAT_COUNTER("BVH Creation/Count Full Nodes", bvhFullNodes);
 STAT_PERCENT("BVH Creation/Wrong Predictions", bvhWrongPrediction,bvhAllPrediction);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Leaves", bvhLeafDepth);
 STAT_INT_DISTRIBUTION("BVH Creation/Depth Interior", bvhIntNodeDepth);
-//Traversal
+STAT_INT_DISTRIBUTION("BVH Creation/Num children", bvhNumChildNodes);
+
+    //Traversal
 STAT_INT_DISTRIBUTION("BVH Traversal/Avg Leaf size hit", bvhAvgLeaveSizeHit);
 STAT_PIXEL_RATIO("BVH Traversal/Interior Nodes hit", bvhInteriorHit, bvhInteriorTested);
 STAT_PIXEL_RATIO("BVH Traversal/Leaf Nodes hit", bvhLeavesHit, bvhLeavesTested);
@@ -1133,6 +1136,9 @@ Float WideBVHAggregate::calcMetrics(WideBVHBuildNode *root, int depth) {
         return leafCost(root->PrimCount());
     } else {
         bvhIntNodeDepth << depth;
+        bvhNumChildNodes << root->numChildren();
+        if (root->numChildren() == TreeWidth)
+            bvhFullNodes++;
         ICostCalcable *nodes[MaxTreeWidth]{};
         for (int i = 0; i < TreeWidth; i++) {
             nodes[i] = root->getChild(i);
