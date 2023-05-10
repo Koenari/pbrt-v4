@@ -1080,7 +1080,7 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
                                             Bounds3f combinedBounds) const {
     const ICostCalcable *bucket = buckets[idx];
     //Switch between different approaches to approximate overlapping prims
-    bool constexpr useVolApprox = true;
+    bool constexpr useVolApprox = false;
     if (idx >= count || bucket == NULL)
         return 0.f;
     Float prob = bucket->Bounds().SurfaceArea();
