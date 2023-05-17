@@ -1085,7 +1085,6 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
         return 0.f;
     Float prob = bucket->Bounds().SurfaceArea();
     if (splitMethod == SplitMethod::EPO && epoRatio > 0) {
-        prob *= (1 - epoRatio);
         Float addedExtraVol = 0;
         Float addedExtraSA = 0;
         Bounds3f unionedOverlap;
@@ -1115,12 +1114,12 @@ Float BVHAggregate::penalizedHitProbability(int idx, int count, ICostCalcable **
                     unionedExtraVol < addedExtraVol ? unionedExtraVol : addedExtraVol;
 
                 // Approximate by percentag of root node taken up by overlaps
-                prob += epoRatio * (extraVol / combinedBounds.Volume()) *
-                        combinedBounds.SurfaceArea();
+                prob *=
+                    ((1 - epoRatio) + epoRatio * (extraVol / combinedBounds.Volume()));
             }
         } else {
             // Aproximate by adding Surface Areas approximations calculated per overlap
-            prob += epoRatio * addedExtraSA;
+            prob = (1 - epoRatio) * prob + epoRatio * addedExtraSA;
         }
         
     }
