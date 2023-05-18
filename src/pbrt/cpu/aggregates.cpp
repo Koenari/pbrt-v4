@@ -2645,10 +2645,12 @@ FourWideBVHBuildNode *FourWideBVHAggregate::buildRecursive(
                     }
                     // Approximate best sunbsequent split axis by using the max
                     // cntreoid bound dimension for most probable split on main dimension
+                    if (complexSplit) {
                     centroidBoundsAbv = cumCentroidBoundsAbv[dim1ProposedSplit];
                     centroidBoundsBel = cumCentroidBoundsBel[dim1ProposedSplit];
                     axis[0] = cumCentroidBoundsAbv[dim1ProposedSplit].MaxDimension();
                     axis[2] = cumCentroidBoundsBel[dim1ProposedSplit].MaxDimension();
+                    }
                     BVHSplitBucket buckets0[nBuckets][nBuckets];
                     BVHSplitBucket buckets2[nBuckets][nBuckets];
                     // Initialize _BVHSplitBucket_ arrays for partition buckets
