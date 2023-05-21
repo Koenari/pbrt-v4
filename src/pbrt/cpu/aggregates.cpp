@@ -3248,6 +3248,7 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
+    bool isRoot = (*totalNodes) == 0;
     EightWideBVHBuildNode *newChildren[8]{NULL};
     int axis[7]{};
     switch (collapseVariant) {
@@ -3347,6 +3348,8 @@ EightWideBVHBuildNode *EightWideBVHAggregate::collapseBinBVH(BVHBuildNode *binRo
     EightWideBVHBuildNode *newNode = new EightWideBVHBuildNode();
     ++*totalNodes;
     newNode->InitInterior(axis, newChildren);
+    if (isRoot && collapseVariant == 1)
+        optimizeTree(newNode, totalNodes, MergeIntoParent);
     return newNode;
 };
 //ToDo: Finish
@@ -4115,6 +4118,7 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
         leaf->InitLeaf(binRoot->firstPrimOffset, binRoot->nPrimitives, binRoot->bounds);
         return leaf;
     }
+    bool isRoot = (*totalNodes) == 0;
     SixteenWideBVHBuildNode *newChildren[16]{NULL};
     int axis[15]{};
     switch (collapseVariant) {
@@ -4232,6 +4236,8 @@ SixteenWideBVHBuildNode *SixteenWideBVHAggregate::collapseBinBVH(
     SixteenWideBVHBuildNode *newNode = new SixteenWideBVHBuildNode();
     ++*totalNodes;
     newNode->InitInterior(axis, newChildren);
+    if (isRoot && collapseVariant == 1)
+        optimizeTree(newNode, totalNodes, MergeIntoParent);
     return newNode;
 }
 SixteenWideBVHBuildNode *SixteenWideBVHAggregate::buildRecursive(
