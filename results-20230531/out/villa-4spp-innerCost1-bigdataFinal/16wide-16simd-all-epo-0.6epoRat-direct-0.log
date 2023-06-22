@@ -1,0 +1,177 @@
+[ tid 15896 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 6576 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 25356 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 11744 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 3192 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 19408 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 5556 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 16752 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 10016 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 3308 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 22880 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 7768 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 12716 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 13184 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 16160 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 27320 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 13884 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 28144 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 5404 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 9796 @     0.004s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:611 ] Started parsing ../../scenes/villa/villa.pbrt
+[ tid 9796 @     0.004s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:50 ] World-space position: [ 10.239117, 5.013952, 3.76 ]
+[ tid 9796 @     0.004s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:748 ] Starting to create filter and film
+[ tid 9796 @     0.004s film.h:196 ] Created film with full resolution [ 1800, 870 ], pixelBounds [ [ 0, 0 ] - [ 1800, 870 ] ]
+[ tid 9796 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:765 ] Finished creating filter and film
+[ tid 19408 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:769 ] Starting to create sampler
+[ tid 11744 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:778 ] Starting to create camera
+[ tid 11744 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:197 ] Camera min pos differentials: [ 0, 0, 0 ], [ 0, 0, 0 ]
+[ tid 11744 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:199 ] Camera min dir differentials: [ -0.00016663967, 0.00052119786, -1.7881393e-7 ], [ -0.00056533515, -0.0003773868, -1.7881393e-7 ]
+[ tid 11744 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:784 ] Finished creating camera
+[ tid 16160 @     0.020s scene.h:290 ] Retrieved Camera from future
+[ tid 9796 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:767 ] Started parsing C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\villa\materials.pbrt
+[ tid 9796 @     0.026s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:642 ] Finished parsing C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\villa\materials.pbrt
+[ tid 9796 @     0.026s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:767 ] Started parsing C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\villa\geometry.pbrt
+[ tid 9796 @     0.029s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:642 ] Finished parsing C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\villa\geometry.pbrt
+[ tid 9796 @     0.029s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:642 ] Finished parsing ../../scenes/villa/villa.pbrt
+[ tid 9796 @     0.029s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:32 ] Starting textures
+[ tid 9796 @     0.029s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1180 ] Starting to consume texture futures
+[ tid 16160 @     0.069s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\image.cpp:1164 ] Read EXR image C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\villa\textures\sky.exr (2048 x 2048)
+[ tid 9796 @     1.264s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1192 ] Finished consuming texture futures
+[ tid 9796 @     1.264s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1194 ] Starting to create remaining textures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1250 ] Done creating textures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:34 ] Finished textures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1289 ] Starting area lights
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1341 ] Finished area lights
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1343 ] Starting to consume non-area light futures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1347 ] Finished consuming non-area light futures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:41 ] Starting materials
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1113 ] Starting to consume 0 normal map futures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1120 ] Finished consuming normal map futures
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:45 ] Finished materials
+[ tid 9796 @     1.266s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1444 ] Starting shapes
+[ tid 9796 @     1.467s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1519 ] Finished shapes
+[ tid 9796 @     1.467s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1522 ] Starting instances
+[ tid 5404 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 9796 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 7768 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 12716 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 25356 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 3308 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 6576 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 27320 @     1.468s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 13884 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 10016 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 11744 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 19408 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 12716 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 1 nodes for 88 primitives (0.00 MB)
+[ tid 12716 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 0 ms
+[ tid 12716 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 1 nodes for 88 primitives (0.00 MB)
+[ tid 12716 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 12716 @     1.469s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 1.389
+[ tid 9796 @     1.471s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 6 nodes for 308 primitives (0.00 MB)
+[ tid 9796 @     1.471s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 3 ms
+[ tid 9796 @     1.471s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 4 nodes for 308 primitives (0.00 MB)
+[ tid 9796 @     1.471s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 25356 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 9 nodes for 398 primitives (0.00 MB)
+[ tid 9796 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 2.474
+[ tid 25356 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 3 ms
+[ tid 25356 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 4 nodes for 398 primitives (0.00 MB)
+[ tid 25356 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 25356 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 3.797
+[ tid 7768 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 9 nodes for 398 primitives (0.00 MB)
+[ tid 7768 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 4 ms
+[ tid 7768 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 5 nodes for 398 primitives (0.00 MB)
+[ tid 7768 @     1.472s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 7768 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 6.769
+[ tid 5404 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 4 nodes for 288 primitives (0.00 MB)
+[ tid 5404 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 5 ms
+[ tid 5404 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 4 nodes for 288 primitives (0.00 MB)
+[ tid 5404 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 5404 @     1.473s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 1.593
+[ tid 13184 @     1.476s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 16160 @     1.479s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 6576 @     1.489s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 27 nodes for 1440 primitives (0.01 MB)
+[ tid 6576 @     1.489s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 20 ms
+[ tid 6576 @     1.490s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 18 nodes for 1440 primitives (0.01 MB)
+[ tid 6576 @     1.490s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 3308 @     1.490s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 24 nodes for 1216 primitives (0.01 MB)
+[ tid 3308 @     1.490s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 21 ms
+[ tid 6576 @     1.490s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 3.863
+[ tid 3308 @     1.491s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 17 nodes for 1216 primitives (0.01 MB)
+[ tid 3308 @     1.491s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 3308 @     1.491s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 2.942
+[ tid 27320 @     1.492s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 29 nodes for 1416 primitives (0.01 MB)
+[ tid 27320 @     1.492s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 23 ms
+[ tid 27320 @     1.493s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 19 nodes for 1416 primitives (0.01 MB)
+[ tid 27320 @     1.493s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 1 ms
+[ tid 27320 @     1.494s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 3.784
+[ tid 19408 @     1.509s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 27 nodes for 2446 primitives (0.01 MB)
+[ tid 19408 @     1.509s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 40 ms
+[ tid 19408 @     1.510s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 18 nodes for 2446 primitives (0.01 MB)
+[ tid 19408 @     1.510s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 19408 @     1.510s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 2.059
+[ tid 11744 @     1.511s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 25 nodes for 2446 primitives (0.01 MB)
+[ tid 11744 @     1.511s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 42 ms
+[ tid 11744 @     1.512s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 17 nodes for 2446 primitives (0.01 MB)
+[ tid 11744 @     1.512s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 0 ms
+[ tid 11744 @     1.512s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 1.371
+[ tid 10016 @     1.514s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 32 nodes for 2638 primitives (0.02 MB)
+[ tid 10016 @     1.514s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 44 ms
+[ tid 10016 @     1.515s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 22 nodes for 2638 primitives (0.01 MB)
+[ tid 10016 @     1.515s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 1 ms
+[ tid 10016 @     1.515s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 1.277
+[ tid 13884 @     1.534s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 42 nodes for 4572 primitives (0.02 MB)
+[ tid 13884 @     1.534s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 65 ms
+[ tid 13884 @     1.536s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 35 nodes for 4572 primitives (0.02 MB)
+[ tid 13884 @     1.536s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 1 ms
+[ tid 13884 @     1.536s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 1.429
+[ tid 16160 @     1.946s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 240 nodes for 30153 primitives (0.12 MB)
+[ tid 16160 @     1.946s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 466 ms
+[ tid 13184 @     1.949s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 240 nodes for 30153 primitives (0.12 MB)
+[ tid 13184 @     1.949s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 471 ms
+[ tid 16160 @     1.957s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 231 nodes for 30153 primitives (0.11 MB)
+[ tid 16160 @     1.957s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 11 ms
+[ tid 16160 @     1.957s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 24.769
+[ tid 13184 @     1.960s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 231 nodes for 30153 primitives (0.11 MB)
+[ tid 13184 @     1.960s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 11 ms
+[ tid 13184 @     1.960s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 24.814
+[ tid 9796 @     1.960s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1581 ] Finished instances
+[ tid 9796 @     1.960s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1585 ] Starting top-level accelerator
+[ tid 9796 @     1.968s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:705 ] Creating 16 WideBVHAggregate: SPlitmethod 2 (0) - direct - 127
+[ tid 9796 @     5.569s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:755 ] WideBVH created with 41253 nodes for 2547152 primitives (20.14 MB)
+[ tid 9796 @     5.569s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:756 ] Creation took: 3528 ms
+[ tid 9796 @     6.391s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:764 ] WideBVH optimized to 32613 nodes for 2547152 primitives (15.92 MB)
+[ tid 9796 @     6.391s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:765 ] Optimization took: 821 ms
+[ tid 9796 @     6.402s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:768 ] Calulated cost for BVH is: 14.431
+[ tid 9796 @     6.416s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1589 ] Finished top-level accelerator
+[ tid 9796 @     6.416s scene.h:290 ] Retrieved Camera from future
+[ tid 9796 @     6.416s scene.h:302 ] Retrieved Sampler from future
+[ tid 9796 @     6.416s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:55 ] Starting to create integrator
+[ tid 9796 @     6.416s cpu/integrators.h:70 ] Scene bounds [ [ -24.264156, -11.363886, -3.7634254 ] - [ 20.34241, 5.576548, 5.965 ] ]
+[ tid 9796 @     6.416s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:58 ] Finished creating integrator
+[ tid 9796 @     6.416s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:103 ] Memory used after scene creation: 922652672
+[ tid 9796 @    22.217s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\integrators.cpp:199 ] Writing image with spp = 4
+[ tid 9796 @    22.217s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\film.cpp:535 ] Converting image to RGB and computing final weighted pixel values
+[ tid 9796 @    22.226s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\film.cpp:529 ] Writing image 16wide-16simd-all-epo-0.6epoRat-direct-0.exr with bounds [ [ 0, 0 ] - [ 1800, 870 ] ]
+[ tid 9796 @    22.243s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\integrators.cpp:223 ] Rendering finished
+[ tid 9796 @    22.243s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:161 ] Memory used after rendering: 938635264
+[ tid 9796 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cmd\pbrt.cpp:308 ] Memory used after post-render cleanup: 938647552
+[ tid 10016 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 6576 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 19408 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 5404 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 16160 @    22.244s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 12716 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 5556 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 28144 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 27320 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 11744 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 13184 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 3308 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 13884 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 7768 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 22880 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 16752 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 25356 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 3192 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 15896 @    22.245s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread

@@ -1,0 +1,5 @@
+Configuration,CreationTime,OptimizationTime,InteriorNodes,LeafNodes,EmptyNodes,PrimCount,RayCount,NodeIntersections,PrimIntersections,Metric,SISDNodeIntersections,SISDPrimIntersections,TreeWidth,SimdWidth,Optimizations,CreationMethod,SplitMethod,Variant,EpoRatio,OptiMergedInner,OptiMergedLeaf,OptiMergedParent,LeafDepthAvg,LeafDepthMin,LeafDepthMax,InteriorDepthAvg,TotalNodes
+4wide-4simd-none-epo-0.5epoRat-direct-0,836.0,,,,,,,,,18.252,,,4,4,none,direct,epo,0,0.5,,,,,,,,
+4wide-4simd-none-epo-0.5epoRat-frombvh-0,455.0,,,,,,,,,20.254,,,4,4,none,frombvh,epo,0,0.5,,,,,,,,
+4wide-4simd-none-sah-0epoRat-direct-0,567.0,,,,,,,,,15.137,,,4,4,none,direct,sah,0,0,,,,,,,,
+4wide-4simd-none-sah-0epoRat-frombvh-0,400.0,,,,,,,,,14.978,,,4,4,none,frombvh,sah,0,0,,,,,,,,

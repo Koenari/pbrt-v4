@@ -1,0 +1,86 @@
+[ tid 26888 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 11124 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 8992 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 12988 @     0.000s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 16148 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 29852 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 31148 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 11336 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 22940 @     0.001s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 30812 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 15020 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 15132 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 34452 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 3700 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 25308 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 30172 @     0.002s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 32508 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 28976 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 32652 @     0.003s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:53 ] Started execution in worker thread
+[ tid 11268 @     0.005s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:611 ] Started parsing ../../scenes/sssdragon/sssdragon.pbrt
+[ tid 11268 @     0.005s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:50 ] World-space position: [ 3.69558, -3.46243, 3.25463 ]
+[ tid 11268 @     0.005s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:748 ] Starting to create filter and film
+[ tid 11268 @     0.005s film.h:196 ] Created film with full resolution [ 1366, 1024 ], pixelBounds [ [ 0, 0 ] - [ 1366, 1024 ] ]
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:765 ] Finished creating filter and film
+[ tid 12988 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:769 ] Starting to create sampler
+[ tid 11124 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:778 ] Starting to create camera
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\parser.cpp:642 ] Finished parsing ../../scenes/sssdragon/sssdragon.pbrt
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:32 ] Starting textures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1180 ] Starting to consume texture futures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1192 ] Finished consuming texture futures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1194 ] Starting to create remaining textures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1250 ] Done creating textures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:34 ] Finished textures
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1289 ] Starting area lights
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1341 ] Finished area lights
+[ tid 11124 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:197 ] Camera min pos differentials: [ 0, 0, 0 ], [ 0, 0, 0 ]
+[ tid 11268 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1343 ] Starting to consume non-area light futures
+[ tid 11124 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cameras.cpp:199 ] Camera min dir differentials: [ 0.0003453046, -0.000269413, -5.9604645e-8 ], [ 0.00024636093, 0.00037476423, -5.9604645e-8 ]
+[ tid 11124 @     0.020s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:784 ] Finished creating camera
+[ tid 22940 @     0.020s scene.h:290 ] Retrieved Camera from future
+[ tid 22940 @     0.066s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\image.cpp:1164 ] Read EXR image C:\Users\koena\source\repos\Koenari\pbrt-v4\build\working\scenes\sssdragon\textures\small_rural_road_equiarea.exr (2048 x 2048)
+[ tid 11268 @     0.285s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1347 ] Finished consuming non-area light futures
+[ tid 11268 @     0.285s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:41 ] Starting materials
+[ tid 11268 @     0.285s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1113 ] Starting to consume 0 normal map futures
+[ tid 11268 @     0.285s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1120 ] Finished consuming normal map futures
+[ tid 11268 @     0.292s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:45 ] Finished materials
+[ tid 11268 @     0.292s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1444 ] Starting shapes
+[ tid 11268 @     1.653s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1519 ] Finished shapes
+[ tid 11268 @     1.653s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1522 ] Starting instances
+[ tid 11268 @     1.653s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1581 ] Finished instances
+[ tid 11268 @     1.653s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1585 ] Starting top-level accelerator
+[ tid 11268 @     3.124s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:513 ] BVH created with 7859477 nodes for 7219557 primitives (239.85 MB)
+[ tid 11268 @     3.124s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:516 ] Creation took: 1253 ms
+[ tid 11268 @     3.204s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\aggregates.cpp:518 ] Calulated cost for BVH is: 14.035
+[ tid 11268 @     3.308s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\scene.cpp:1589 ] Finished top-level accelerator
+[ tid 11268 @     3.308s scene.h:290 ] Retrieved Camera from future
+[ tid 11268 @     3.308s scene.h:302 ] Retrieved Sampler from future
+[ tid 11268 @     3.308s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:55 ] Starting to create integrator
+[ tid 11268 @     3.308s cpu/integrators.h:70 ] Scene bounds [ [ -10.760439, -1.9702945, -3.72963 ] - [ 1.4243946, 11.530299, 3.5924516 ] ]
+[ tid 11268 @     3.308s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:58 ] Finished creating integrator
+[ tid 11268 @     3.308s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:103 ] Memory used after scene creation: 965365760
+[ tid 11268 @    10.070s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\integrators.cpp:199 ] Writing image with spp = 4
+[ tid 11268 @    10.070s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\film.cpp:535 ] Converting image to RGB and computing final weighted pixel values
+[ tid 11268 @    10.079s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\film.cpp:529 ] Writing image 2wide-2simd-none-sah-0epoRat-direct-0.exr with bounds [ [ 0, 0 ] - [ 1366, 1024 ] ]
+[ tid 11268 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\integrators.cpp:223 ] Rendering finished
+[ tid 11268 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cpu\render.cpp:161 ] Memory used after rendering: 970055680
+[ tid 11268 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\cmd\pbrt.cpp:308 ] Memory used after post-render cleanup: 970072064
+[ tid 16148 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 11124 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 22940 @    10.102s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 8992 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 31148 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 34452 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 12988 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 32508 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 28976 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 25308 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 30812 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 15020 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 29852 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 15132 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 26888 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 3700 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 32652 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 11336 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread
+[ tid 30172 @    10.103s C:\Users\koena\source\repos\Koenari\pbrt-v4\src\pbrt\util\parallel.cpp:63 ] Exiting worker thread

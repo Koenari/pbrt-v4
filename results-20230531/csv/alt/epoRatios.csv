@@ -1,0 +1,1 @@
+Configuration,CreationTime,OptimizationTime,InteriorNodes,LeafNodes,EmptyNodes,PrimCount,RayCount,NodeIntersections,PrimIntersections,Metric,SISDNodeIntersections,SISDPrimIntersections,TreeWidth,SimdWidth,Optimizations,CreationMethod,SplitMethod,Variant,EpoRatio,OptiMergedInner,OptiMergedLeaf,OptiMergedParent,LeafDepthAvg,LeafDepthMin,LeafDepthMax,InteriorDepthAvg,TotalNodes

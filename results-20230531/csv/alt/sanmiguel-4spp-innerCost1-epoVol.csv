@@ -1,0 +1,7 @@
+Configuration,CreationTime,OptimizationTime,InteriorNodes,LeafNodes,EmptyNodes,PrimCount,RayCount,NodeIntersections,PrimIntersections,Metric,SISDNodeIntersections,SISDPrimIntersections,TreeWidth,SimdWidth,Optimizations,CreationMethod,SplitMethod,Variant,EpoRatio,OptiMergedInner,OptiMergedLeaf,OptiMergedParent,LeafDepthAvg,LeafDepthMin,LeafDepthMax,InteriorDepthAvg,TotalNodes
+16wide-16simd-none-epo-0.67epoRat-direct-0,603.0,,113579,339219,1955,2662968,6231520,1669666380,238096187,2.464,5395334854,1995476333,16,16,none,direct,epo,0,0.67,,,,9.105,0.0,18.0,7.79,454316
+16wide-16simd-none-epo-0.67epoRat-frombvh-0,653.0,,133955,268853,133449,2662968,6231520,2157116585,269901956,2.167,6644698299,2756174277,16,16,none,frombvh,epo,0,0.67,,,,13.075,0.0,35.0,11.863,535820
+4wide-4simd-none-epo-0.41epoRat-direct-0,809.0,,324018,952052,20439,2662968,6231520,1415022269,272615294,4.495,5168014293,727755709,4,4,none,direct,epo,0,0.41,,,,9.537,0.0,17.0,8.223,1296072
+4wide-4simd-none-epo-0.41epoRat-frombvh-0,626.0,,363249,726715,363469,2662968,6231520,1543161540,311509736,3.82,5250547817,1005127541,4,4,none,frombvh,epo,0,0.41,,,,11.549,0.0,25.0,10.302,1452996
+8wide-8simd-none-epo-0.67epoRat-direct-0,755.0,,207115,615852,5930,2662968,6231520,1457345178,245938274,2.469,5064783002,1102193827,8,8,none,direct,epo,0,0.67,,,,9.524,0.0,18.0,8.207,828460
+8wide-8simd-none-epo-0.67epoRat-frombvh-0,708.0,,257643,515345,258021,2662968,6231520,1852340260,283060707,2.18,6127228797,1526514125,8,8,none,frombvh,epo,0,0.67,,,,13.833,0.0,37.0,12.598,1030572
